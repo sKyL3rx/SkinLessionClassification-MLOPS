@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment
+.env
+.env.local
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+src/*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Data
+data/raw/*
+data/external/*
+data/interim/*
+!data/raw/*.dvc
+
+# Large model artifacts
+artifacts/models/
+deployment/onnx/*.onnx
+deployment/onnx/*.onnx.data
+
+# Optional large reports
+artifacts/reports/predictions.csv
+artifacts/reports/runs/
+
+# MLflow local runs
+mlruns/
+mlartifacts/
+
+# DVC local cache
+.dvc/cache/
+.dvc/tmp/
+.dvc/config.local
+dvc_plots/
+
+# docs
+docs/

@@ -1,0 +1,6 @@
+outs:
+- md5: e91197fe26f566d78fbb9cecaf566021.dir
+  size: 2903469944
+  nfiles: 10020
+  hash: md5
+  path: ham10000

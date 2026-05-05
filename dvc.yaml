@@ -1,0 +1,77 @@
+stages:
+  prepare_data:
+    cmd: python scripts/prepare_ham10000.py --config params.yaml
+    deps:
+      - scripts/prepare_ham10000.py
+    params:
+      - data.raw_dir
+      - data.metadata_csv
+      - data.labels
+    outs:
+      - data/processed/metadata.csv
+  
+  make_splits:
+    cmd: python scripts/make_grouped_splits.py --config params.yaml
+    deps:
+      - scripts/make_grouped_splits.py
+      - data/processed/metadata.csv
+    params:
+      - project.seed
+      - data.metadata_csv
+      - data.splits_dir
+      - data.val_size
+      - data.test_size
+      - data.group_by
+    outs:
+      - data/splits/train.csv
+      - data/splits/val.csv
+      - data/splits/test.csv
+  train:
+    cmd: python scripts/train.py --config params.yaml
+    deps:
+      - scripts/train.py
+      - src/lesion_ml
+      - data/splits/train.csv
+      - data/splits/val.csv
+    params:
+      - project.seed
+      - data.image_size
+      - data.num_classes
+      - train
+      - augment
+    outs:
+      - artifacts/models/best.ckpt
+    metrics:
+      - artifacts/reports/train_metrics.json
+    plots:
+      - artifacts/reports/train_history.csv
+
+  evaluate:
+    cmd: python scripts/evaluate.py --config params.yaml
+    deps:
+      - scripts/evaluate.py
+      - src/lesion_ml
+      - artifacts/models/best.ckpt
+      - data/splits/test.csv
+    params:
+      - evaluate.primary_metric
+      - evaluate.top_k
+      - evaluate.confidence_threshold
+    metrics:
+      - artifacts/reports/test_metrics.json
+    plots:
+      - artifacts/reports/confusion_matrix.csv
+      - artifacts/reports/per_class_metrics.csv
+  
+  export_onnx:
+    cmd: python scripts/export_onnx.py --config params.yaml
+    deps:
+      - scripts/export_onnx.py
+      - src/lesion_ml
+      - artifacts/models/best.ckpt
+    params:
+      - inference.checkpoint_path
+      - inference.onnx_path
+      - data.image_size
+    outs:
+      - deployment/onnx/model.onnx
