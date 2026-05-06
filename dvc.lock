@@ -1,13 +1,12 @@
 schema: '2.0'
 stages:
   prepare_data:
-    cmd: venv/bin/python scripts/prepare_ham10000.py --config params.yaml
+    cmd: python scripts/prepare_ham10000.py --config params.yaml
     deps:
     - path: scripts/prepare_ham10000.py
       hash: md5
       md5: 7b48cb885128c0a253b0955c9578da31
       size: 8918
-      isexec: true
     params:
       params.yaml:
         data.labels:
@@ -25,20 +24,17 @@ stages:
       hash: md5
       md5: 8ebc759a169aae845299e96c286428ad
       size: 1194255
-      isexec: true
   make_splits:
-    cmd: venv/bin/python scripts/make_grouped_splits.py --config params.yaml
+    cmd: python scripts/make_grouped_splits.py --config params.yaml
     deps:
     - path: data/processed/metadata.csv
       hash: md5
       md5: 8ebc759a169aae845299e96c286428ad
       size: 1194255
-      isexec: true
     - path: scripts/make_grouped_splits.py
       hash: md5
       md5: bb286dce4d15d34d28fc3c763a012b9f
       size: 7306
-      isexec: true
     params:
       params.yaml:
         data.group_by: split_group
@@ -52,40 +48,34 @@ stages:
       hash: md5
       md5: 2aab1d49108a44db751603b20cde1296
       size: 124658
-      isexec: true
     - path: data/splits/train.csv
       hash: md5
       md5: 83660e4c621b4b2e0bbb3cb3c011e39b
       size: 1003350
-      isexec: true
     - path: data/splits/val.csv
       hash: md5
       md5: 4cacc60454d87cfcb22edfa6d48d75b0
       size: 123517
-      isexec: true
   train:
-    cmd: venv/bin/python scripts/train.py --config params.yaml
+    cmd: python scripts/train.py --config params.yaml
     deps:
     - path: data/splits/train.csv
       hash: md5
       md5: 83660e4c621b4b2e0bbb3cb3c011e39b
       size: 1003350
-      isexec: true
     - path: data/splits/val.csv
       hash: md5
       md5: 4cacc60454d87cfcb22edfa6d48d75b0
       size: 123517
-      isexec: true
     - path: scripts/train.py
       hash: md5
-      md5: 0aaac3a5d709143477cc62680eaf52af
-      size: 10345
-      isexec: true
+      md5: c13dd1aff2fb8bba8305932e0641d73a
+      size: 11900
     - path: src/lesion_ml
       hash: md5
-      md5: 28c89495a3cc28255ecda7a4acb8636e.dir
-      size: 32013
-      nfiles: 8
+      md5: d40c830769b3e8e910b36ac195c73b00.dir
+      size: 12820
+      nfiles: 4
     params:
       params.yaml:
         augment:
@@ -117,52 +107,49 @@ stages:
           in_chans: 3
           drop_rate: 0.0
           drop_path_rate: 0.0
-          batch_size: 128
+          batch_size: 256
           num_workers: 0
-          epochs: 1
+          epochs: 30
           optimizer: adamw
           lr: 0.0003
           weight_decay: 0.0001
+          early_stopping: true
+          early_stopping_patience: 5
+          early_stopping_min_delta: 0.001
           class_weights: true
     outs:
     - path: artifacts/models/best.ckpt
       hash: md5
-      md5: 5d4ba74f45188c6f868cede6e3a07c0c
-      size: 48628074
-      isexec: true
+      md5: 22a5aa232051dd3e8eff2293683b617d
+      size: 48628202
     - path: artifacts/reports/train_history.csv
       hash: md5
-      md5: cccc041dd1198fb9c6e519c826602c86
-      size: 255
-      isexec: true
+      md5: 167008fffbd85362e0f84b37f1c2144b
+      size: 2494
     - path: artifacts/reports/train_metrics.json
       hash: md5
-      md5: 0a13ee9ac8d198a5c49dece4cc7c2928
-      size: 200
-      isexec: true
+      md5: 7a867dccef2352ad52ebd77bcfb8a58b
+      size: 383
   evaluate:
     cmd: python scripts/evaluate.py --config params.yaml
     deps:
     - path: artifacts/models/best.ckpt
       hash: md5
-      md5: 9bf0945153b974cdd3e9277e12e44bc4
-      size: 48628074
-      isexec: true
+      md5: 22a5aa232051dd3e8eff2293683b617d
+      size: 48628202
     - path: data/splits/test.csv
       hash: md5
       md5: 2aab1d49108a44db751603b20cde1296
       size: 124658
-      isexec: true
     - path: scripts/evaluate.py
       hash: md5
       md5: b207ceba6be30048c7ea0d77d514e7c0
       size: 10501
-      isexec: true
     - path: src/lesion_ml
       hash: md5
-      md5: 28c89495a3cc28255ecda7a4acb8636e.dir
-      size: 32013
-      nfiles: 8
+      md5: d40c830769b3e8e910b36ac195c73b00.dir
+      size: 12820
+      nfiles: 4
     params:
       params.yaml:
         evaluate.confidence_threshold: 0.65
@@ -171,37 +158,32 @@ stages:
     outs:
     - path: artifacts/reports/confusion_matrix.csv
       hash: md5
-      md5: e59d30cc19a39040890f428e9699d633
-      size: 177
-      isexec: true
+      md5: f4fde29d923d58a3e5ed238c77cc070b
+      size: 169
     - path: artifacts/reports/per_class_metrics.csv
       hash: md5
-      md5: d6ee98f961451087ba9f1111100abd62
-      size: 455
-      isexec: true
+      md5: 91cf838d28d2620e4789fbb7f2f36e82
+      size: 464
     - path: artifacts/reports/test_metrics.json
       hash: md5
-      md5: 175762452435e02ba4fd9fffe44ddfc7
-      size: 762
-      isexec: true
+      md5: 17e1040810c25f5ec74e3d406b90e8cf
+      size: 761
   export_onnx:
-    cmd: venv/bin/python scripts/export_onnx.py --config params.yaml
+    cmd: python scripts/export_onnx.py --config params.yaml
     deps:
     - path: artifacts/models/best.ckpt
       hash: md5
-      md5: 5d4ba74f45188c6f868cede6e3a07c0c
-      size: 48628074
-      isexec: true
+      md5: 22a5aa232051dd3e8eff2293683b617d
+      size: 48628202
     - path: scripts/export_onnx.py
       hash: md5
       md5: 5d991f4d767801f6713204e9302cfd1e
       size: 2329
-      isexec: true
     - path: src/lesion_ml
       hash: md5
-      md5: 28c89495a3cc28255ecda7a4acb8636e.dir
-      size: 32013
-      nfiles: 8
+      md5: d40c830769b3e8e910b36ac195c73b00.dir
+      size: 12820
+      nfiles: 4
     params:
       params.yaml:
         data.image_size: 224
@@ -210,6 +192,5 @@ stages:
     outs:
     - path: deployment/onnx/model.onnx
       hash: md5
-      md5: b1c89eea9507038bcb2d2b2efc458578
-      size: 589711
-      isexec: true
+      md5: 6633b6236e3a52b8ac853e27dabd217c
+      size: 564821

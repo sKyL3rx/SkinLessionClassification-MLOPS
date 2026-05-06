@@ -1,0 +1,6 @@
+outs:
+- md5: 6030eaea53fa2a3d6aaa0906b58ef20c.dir
+  size: 65255103
+  nfiles: 9
+  hash: md5
+  path: efficientnet_b0_ep30_cw
