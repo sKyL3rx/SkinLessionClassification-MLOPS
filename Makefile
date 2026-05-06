@@ -4,6 +4,7 @@ VENV := venv
 PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 CONFIG ?= params.yaml
+EXP_NAME ?= default_run
 
 setup:
 	python -m venv $(VENV)
@@ -25,6 +26,8 @@ eval:
 export:
 	$(PYTHON) scripts/export_onnx.py --config $(CONFIG)
 
+archive-run:
+	$(PYTHON) scripts/archive_run.py --experiment-name $(EXP_NAME) --dvc-add
 
 test:
 	$(PYTHON) -m pytest
