@@ -9,7 +9,11 @@ SUPPORTED_BACKBONES = {
     "resnet50": "resnet50",
     "efficientnet_b0": "efficientnet_b0",
     "efficientnet_b3": "efficientnet_b3",
-    "convnextv2_tiny": "convnextv2_tiny.fcmae_ft_in22k_in1k",
+
+    # ConvNeXt family
+    "convnext_tiny": "convnext_tiny",
+    "convnext_tiny_hnf": "convnext_tiny_hnf",
+
     "swin_tiny": "swin_tiny_patch4_window7_224",
 }
 
