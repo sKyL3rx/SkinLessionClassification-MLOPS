@@ -1,6 +1,6 @@
 project:
   seed: 42
-  experiment_name: efficientnet_b0_ep30_cw
+  experiment_name: convnext_tiny_ep30_cw
   artifact_dir: artifacts
 
 data:
@@ -31,26 +31,28 @@ data:
   group_by: split_group
 
 train:
-  backbone: efficientnet_b0
+  backbone: convnext_tiny
   pretrained: true
-  in_chans: 3
-  drop_rate: 0.0
-  drop_path_rate: 0.0 
 
-  batch_size: 256
-  num_workers: 0
+  
+  batch_size: 128
+  num_workers: 2
   epochs: 30
 
   optimizer: adamw
-  lr: 0.0003
+  lr: 0.0001
   weight_decay: 0.0001
+  scheduler: cosine
+
+  loss: cross_entropy
+  class_weights: true
+  weighted_sampler: false
+
+  mixed_precision: true
 
   early_stopping: true
   early_stopping_patience: 5
   early_stopping_min_delta: 0.001
-
-
-  class_weights: true
 
 augment:
   use_random_resized_crop: false
@@ -81,4 +83,4 @@ evaluate:
 inference:
   checkpoint_path: artifacts/models/best.ckpt
   onnx_path: deployment/onnx/model.onnx
-  device: cuda
+  device: auto

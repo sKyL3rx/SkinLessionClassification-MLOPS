@@ -1,0 +1,6 @@
+outs:
+- md5: a4ce1527b9e28b83c972adecc38f431b.dir
+  size: 446341644
+  nfiles: 10
+  hash: md5
+  path: convnext_tiny_ep30_cw

@@ -73,8 +73,8 @@ stages:
       size: 11900
     - path: src/lesion_ml
       hash: md5
-      md5: d40c830769b3e8e910b36ac195c73b00.dir
-      size: 12820
+      md5: ad9923ae72807c54af940401044b89ae.dir
+      size: 12870
       nfiles: 4
     params:
       params.yaml:
@@ -102,41 +102,42 @@ stages:
         data.num_classes: 7
         project.seed: 42
         train:
-          backbone: efficientnet_b0
+          backbone: convnext_tiny
           pretrained: true
-          in_chans: 3
-          drop_rate: 0.0
-          drop_path_rate: 0.0
-          batch_size: 256
-          num_workers: 0
+          batch_size: 128
+          num_workers: 2
           epochs: 30
           optimizer: adamw
-          lr: 0.0003
+          lr: 0.0001
           weight_decay: 0.0001
+          scheduler: cosine
+          loss: cross_entropy
+          class_weights: true
+          weighted_sampler: false
+          mixed_precision: true
           early_stopping: true
           early_stopping_patience: 5
           early_stopping_min_delta: 0.001
-          class_weights: true
     outs:
     - path: artifacts/models/best.ckpt
       hash: md5
-      md5: 22a5aa232051dd3e8eff2293683b617d
-      size: 48628202
+      md5: 5616983abe22ceb89705130e20fbf4a0
+      size: 334094901
     - path: artifacts/reports/train_history.csv
       hash: md5
-      md5: 167008fffbd85362e0f84b37f1c2144b
-      size: 2494
+      md5: 635846a5cf02a0b2c8193324ce5d762f
+      size: 3748
     - path: artifacts/reports/train_metrics.json
       hash: md5
-      md5: 7a867dccef2352ad52ebd77bcfb8a58b
-      size: 383
+      md5: b29a8a1acc44e85a5ff17adfa48bdcab
+      size: 380
   evaluate:
     cmd: python scripts/evaluate.py --config params.yaml
     deps:
     - path: artifacts/models/best.ckpt
       hash: md5
-      md5: 22a5aa232051dd3e8eff2293683b617d
-      size: 48628202
+      md5: 5616983abe22ceb89705130e20fbf4a0
+      size: 334094901
     - path: data/splits/test.csv
       hash: md5
       md5: 2aab1d49108a44db751603b20cde1296
@@ -147,8 +148,8 @@ stages:
       size: 10501
     - path: src/lesion_ml
       hash: md5
-      md5: d40c830769b3e8e910b36ac195c73b00.dir
-      size: 12820
+      md5: ad9923ae72807c54af940401044b89ae.dir
+      size: 12870
       nfiles: 4
     params:
       params.yaml:
@@ -158,31 +159,31 @@ stages:
     outs:
     - path: artifacts/reports/confusion_matrix.csv
       hash: md5
-      md5: f4fde29d923d58a3e5ed238c77cc070b
+      md5: 3036baa58a26f61dac195f026d843eba
       size: 169
     - path: artifacts/reports/per_class_metrics.csv
       hash: md5
-      md5: 91cf838d28d2620e4789fbb7f2f36e82
-      size: 464
+      md5: 5866f80290c7126bd2402d86353c53c4
+      size: 446
     - path: artifacts/reports/test_metrics.json
       hash: md5
-      md5: 17e1040810c25f5ec74e3d406b90e8cf
-      size: 761
+      md5: fda31b9f62a8b358f333ba7af8266ba2
+      size: 758
   export_onnx:
     cmd: python scripts/export_onnx.py --config params.yaml
     deps:
     - path: artifacts/models/best.ckpt
       hash: md5
-      md5: 22a5aa232051dd3e8eff2293683b617d
-      size: 48628202
+      md5: 5616983abe22ceb89705130e20fbf4a0
+      size: 334094901
     - path: scripts/export_onnx.py
       hash: md5
       md5: 5d991f4d767801f6713204e9302cfd1e
       size: 2329
     - path: src/lesion_ml
       hash: md5
-      md5: d40c830769b3e8e910b36ac195c73b00.dir
-      size: 12820
+      md5: ad9923ae72807c54af940401044b89ae.dir
+      size: 12870
       nfiles: 4
     params:
       params.yaml:
@@ -192,5 +193,5 @@ stages:
     outs:
     - path: deployment/onnx/model.onnx
       hash: md5
-      md5: 6633b6236e3a52b8ac853e27dabd217c
-      size: 564821
+      md5: b274779da1dc539f0e6a4b6b7c9f6e48
+      size: 728655
