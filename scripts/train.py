@@ -292,6 +292,8 @@ def train_one_epoch(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     scheduler: LambdaLR | None,
+    scaler: torch.amp.GradScaler,
+    config: dict[str, Any],
 ) -> tuple[float, float, float, float, float]:
     
     model.train()
@@ -300,17 +302,44 @@ def train_one_epoch(
     all_targets: list[int] = []
     all_preds: list[int] = []
 
+
+    use_amp = bool(config["train"].get("mixed_precision", False)) and device.type == "cuda"
+    grad_clip_norm = float(config["train"].get("grad_clip_norm", 0.0))
+    channels_last = bool(config["train"].get("channels_last", False)) and device.type == "cuda"
+
+
     start_time = time.time()
 
     for batch in loader:
-        images = batch["image"].to(device)
-        targets = batch["label"].to(device)
+        images = batch["image"].to(device, non_blocking= True)
+        targets = batch["label"].to(device, non_blocking= True)
 
-        optimizer.zero_grad()
-        logits = model(images)
-        loss = loss_fn(logits, targets)
-        loss.backward()
-        optimizer.step()
+        if channels_last:
+            images = images.contiguous(memory_format=torch.channels_last)
+
+        optimizer.zero_grad(set_to_none=True)
+
+        with torch.amp.autocast(device_type = device.type, enabled = use_amp):
+            logits = model(images)
+            loss = loss_fn(logits, targets)
+        
+        if scaler.is_enabled():
+            scaler.scale(loss).backward()
+
+            if grad_clip_norm > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+
+            if grad_clip_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+
+            optimizer.step()
+
 
         if scheduler is not None:
             scheduler.step()
@@ -396,6 +425,7 @@ def train(
     loss_fn: nn.Module,
     optimizer: torch.optim.Optimizer,
     scheduler: LambdaLR | None,
+    scaler: torch.amp.GradScaler,
     device: torch.device,
     epochs: int,
     ckpt_path: Path,
@@ -426,6 +456,8 @@ def train(
                 optimizer=optimizer,
                 device=device,
                 scheduler=scheduler,
+                scaler = scaler,
+                config = config,
             )
 
         val_loss, val_acc, val_f1, val_time = evaluate(
@@ -542,10 +574,13 @@ def main() -> None:
     optimizer = build_optimizer(model, config)
 
     scheduler = build_scheduler(
-    optimizer=optimizer,
-    config=config,
-    steps_per_epoch=len(train_loader),
+        optimizer=optimizer,
+        config=config,
+        steps_per_epoch=len(train_loader),
     )
+
+    use_amp = bool(config["train"].get("mixed_precision", False)) and device.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     
 
 
@@ -561,12 +596,14 @@ def main() -> None:
         loss_fn=loss_fn,
         optimizer=optimizer,
         scheduler=scheduler,
+        scaler = scaler,
         device=device,
         epochs=epochs,
         ckpt_path=ckpt_path,
         report_dir=report_dir,
         config=config,
         label_to_idx=label_to_idx,
+        
     )
 
     print("[INFO] Training finished.")
