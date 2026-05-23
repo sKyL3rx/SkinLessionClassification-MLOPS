@@ -21,6 +21,10 @@ from lesion_ml.models.factory import build_model_from_config
 
 from lesion_ml.models.losses import FocalLoss
 
+import math
+from torch.optim.lr_scheduler import LambdaLR
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a skin lesion classification model.")
     parser.add_argument(
@@ -243,13 +247,53 @@ def build_optimizer(model: nn.Module, config: dict[str, Any]) -> torch.optim.Opt
 
     raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
+def build_scheduler(
+    optimizer: torch.optim.Optimizer,
+    config: dict[str, Any],
+    steps_per_epoch: int,
+) -> LambdaLR | None:
+    
+    train_cfg = config["train"]
+
+    scheduler_name = str(train_cfg.get("scheduler", "none")).lower()
+
+    if scheduler_name in {"none", "null", ""}:
+        return None
+    
+    if scheduler_name not in {"cosine", "cosine_warmup"}:
+        raise ValueError(f"Unsupported scheduler: {scheduler_name}")
+    
+    epochs = int(train_cfg["epochs"])
+    lr = float(train_cfg.get("lr", 3e-4))
+    min_lr = float(train_cfg.get("min_lr", 1e-6))
+    warmup_epochs = int(train_cfg.get("warmup_epochs", 0))
+
+    total_steps = max( epochs * steps_per_epoch, 1)
+    warmup_steps = max(warmup_epochs * steps_per_epoch, 0)
+
+    min_lr_ratio = min_lr / lr
+
+    def lr_lambda(step: int) -> float:
+        if warmup_steps > 0 and step < warmup_steps:
+            return max(float(step + 1) / float(warmup_steps), 1)
+
+        progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
+        progress = min(max(progress, 0.0), 1.0)
+
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
+
+    return LambdaLR(optimizer, lr_lambda=lr_lambda)
+    
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
     loss_fn: nn.Module,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-) -> tuple[float, float, float]:
+    scheduler: LambdaLR | None,
+) -> tuple[float, float, float, float, float]:
+    
     model.train()
 
     running_loss = 0.0
@@ -268,6 +312,10 @@ def train_one_epoch(
         loss.backward()
         optimizer.step()
 
+        if scheduler is not None:
+            scheduler.step()
+
+
         running_loss += loss.item() * images.size(0)
 
         preds = torch.argmax(logits, dim=1)
@@ -278,8 +326,9 @@ def train_one_epoch(
     epoch_acc = accuracy_score(all_targets, all_preds)
     epoch_f1 = f1_score(all_targets, all_preds, average="macro")
     epoch_time = time.time() - start_time
+    current_lr = optimizer.param_groups[0]["lr"]
 
-    return epoch_loss, epoch_acc, epoch_f1, epoch_time
+    return epoch_loss, epoch_acc, epoch_f1, epoch_time, current_lr
 
 
 @torch.no_grad()
@@ -346,6 +395,7 @@ def train(
     val_loader: DataLoader,
     loss_fn: nn.Module,
     optimizer: torch.optim.Optimizer,
+    scheduler: LambdaLR | None,
     device: torch.device,
     epochs: int,
     ckpt_path: Path,
@@ -353,6 +403,7 @@ def train(
     config: dict[str, Any],
     label_to_idx: dict[str, int],
 ) -> dict[str, Any]:
+    
     best_val_f1 = -1.0
     history: list[dict[str, Any]] = []
 
@@ -368,13 +419,14 @@ def train(
     ckpt_path.parent.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(1, epochs + 1):
-        train_loss, train_acc, train_f1, train_time = train_one_epoch(
-            model=model,
-            loader=train_loader,
-            loss_fn=loss_fn,
-            optimizer=optimizer,
-            device=device,
-        )
+        train_loss, train_acc, train_f1, train_time, current_lr = train_one_epoch(
+                model=model,
+                loader=train_loader,
+                loss_fn=loss_fn,
+                optimizer=optimizer,
+                device=device,
+                scheduler=scheduler,
+            )
 
         val_loss, val_acc, val_f1, val_time = evaluate(
             model=model,
@@ -408,6 +460,7 @@ def train(
 
         row = {
             "epoch": epoch,
+            "lr": current_lr,
             "train_loss": train_loss,
             "train_acc": train_acc,
             "train_macro_f1": train_f1,
@@ -456,6 +509,9 @@ def train(
         "early_stopping_patience": early_stopping_patience,
         "early_stopping_min_delta": early_stopping_min_delta,
         "backbone": config["train"]["backbone"],
+        "scheduler": str(config["train"].get("scheduler", "none")),
+        "warmup_epochs": int(config["train"].get("warmup_epochs", 0)),
+        "min_lr": float(config["train"].get("min_lr", 0.0)),
         "checkpoint_path": str(ckpt_path),
         "history_csv": str(history_csv_path),
     }
@@ -485,6 +541,14 @@ def main() -> None:
 
     optimizer = build_optimizer(model, config)
 
+    scheduler = build_scheduler(
+    optimizer=optimizer,
+    config=config,
+    steps_per_epoch=len(train_loader),
+    )
+    
+
+
     epochs = int(config["train"]["epochs"])
     artifact_dir = Path(config["project"].get("artifact_dir", "artifacts"))
     ckpt_path = artifact_dir / "models" / "best.ckpt"
@@ -496,6 +560,7 @@ def main() -> None:
         val_loader=val_loader,
         loss_fn=loss_fn,
         optimizer=optimizer,
+        scheduler=scheduler,
         device=device,
         epochs=epochs,
         ckpt_path=ckpt_path,
