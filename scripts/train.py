@@ -13,12 +13,13 @@ import torch
 import torch.nn as nn
 import yaml
 from sklearn.metrics import accuracy_score, f1_score
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from lesion_ml.data.dataset import SkinLesionDataset
 from lesion_ml.data.transforms import build_transforms_from_config
 from lesion_ml.models.factory import build_model_from_config
 
+from lesion_ml.models.losses import FocalLoss
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a skin lesion classification model.")
@@ -47,12 +48,30 @@ def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def build_weighted_sampler(
+    train_ds: SkinLesionDataset,
+    label_to_idx: dict[str, int],
+) -> WeightedRandomSampler:
+    labels = train_ds["label"].astype(str).str.lower().tolist()
+    label_indices = [label_to_idx[label] for label in labels]
+    
+    counts = np.bincount(label_indices, min = len(label_to_idx))
+    class_weights = 1.0 / np.maximum(counts, 1)
+    sample_weights = np.array([class_weights[idx] for idx in label_indices], dtype=np.float64)
+
+    return WeightedRandomSampler(
+        weights=torch.as_tensor(sample_weights, dtype=torch.double),
+        num_samples=len(sample_weights),
+        replacement=True,
+    )
+
 def build_dataloader(config: dict[str, Any]) -> DataLoader:
     train_csv = config["data"]["train_csv"]
     val_csv = config["data"]["val_csv"]
 
     train_tfms = build_transforms_from_config(config, split="train")
     val_tfms = build_transforms_from_config(config, split="val")
+    use_weighted_sampler = bool(config["train"].get("weighted_sampler", False))
 
     train_ds = SkinLesionDataset(
         csv_path=train_csv,
@@ -75,13 +94,18 @@ def build_dataloader(config: dict[str, Any]) -> DataLoader:
     batch_size = int(config["train"]["batch_size"])
     num_workers = int(config["train"].get("num_workers", 0))
 
+
+    sampler = build_weighted_sampler(train_ds, label_to_idx) if use_weighted_sampler else None
+
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=sampler is None,
+        sampler=sampler,
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
-    )
+        persistent_workers=num_workers > 0,
+    )      
 
     val_loader = DataLoader(
         val_ds,
@@ -89,32 +113,135 @@ def build_dataloader(config: dict[str, Any]) -> DataLoader:
         shuffle=False,
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
+        persistent_workers=num_workers > 0,
     )
 
     return train_loader, val_loader, label_to_idx
 
-
-def build_loss_fn(config: dict[str, Any], label_to_idx: dict[str, int]) -> nn.Module:
-    use_class_weights = bool(config["train"].get("class_weights", False))
-
-    if not use_class_weights:
-        return nn.CrossEntropyLoss()
-
-    train_csv = config["data"]["train_csv"]
+def compute_inverse_class_weights(
+    train_csv: str,
+    label_to_idx: dict[str, int],
+) -> torch.Tensor:  
     df = pd.read_csv(train_csv)
     counts = df["label"].astype(str).str.lower().value_counts().to_dict()
 
     weights = []
-
-    for label_name, _idx in sorted(label_to_idx.items(), key=lambda x: x[1]):
+    for label_name, _idx in sorted(label_to_idx.items(), key = lambda x: x[1]):
         count = counts.get(label_name, 1)
         weights.append(1.0 / max(count, 1))
+    
+    weights_t = torch.tensor(weights, dtype=torch.float32)
+    weights_t = weights_t / weights_t.sum() * len(weights_t)
 
-    weights = torch.tensor(weights, dtype=torch.float32)
+    return weights_t
+
+def compute_effective_num_weights(
+    train_csv: str,
+    label_to_idx: dict[str, int],
+    beta: float = 0.999,
+) -> torch.Tensor:
+    
+    df = pd.read_csv(train_csv)
+    counts_dict = df["label"].astype(str).str.lower().value_counts().to_dict()
+
+    counts = []
+
+    for label_name, _idx in sorted(label_to_idx.items(), key = lambda x: x[1]):
+        counts.append(max(int(counts_dict.get(label_name, 1)), 1))
+    
+    counts_t = torch.tensor(counts, dtype=torch.float32)
+    beta_t = torch.tensor(beta, dtype=torch.float32)
+
+    effective_num = 1.0 - torch.pow(beta_t, counts_t)
+    weights = (1.0 - beta) / effective_num
     weights = weights / weights.sum() * len(weights)
 
-    return nn.CrossEntropyLoss(weight=weights)
+    return weights
 
+def build_loss_fn(config: dict[str, Any], label_to_idx: dict[str, int]) -> nn.Module:
+    train_cfg = config["train"]
+
+    loss_name = str(train_cfg.get("loss", "cross_entropy")).lower()
+    train_csv = config["data"]["train_csv"]
+
+    label_smoothing = float(train_cfg.get("label_smoothing", 0.0))
+    use_class_weights = bool(train_cfg.get("class_weights", False))
+
+    weight = None
+
+    if loss_name in {"cb_focal", "class_balanced_focal"}:
+        beta = float(train_cfg.get("cb_beta", 0.999))
+        gamma = float(train_cfg.get("focal_gamma", 2.0))
+
+        weight = compute_effective_num_weights(
+            train_csv=train_csv,
+            label_to_idx=label_to_idx,
+            beta=beta,
+        )
+
+        return FocalLoss(
+            gamma=gamma,
+            weight=weight,
+            label_smoothing=label_smoothing,
+        )
+    
+    if use_class_weights:
+        weight = compute_inverse_class_weights(
+            train_csv=train_csv,
+            label_to_idx=label_to_idx,
+        )
+
+    if loss_name in {"cross_entropy", "ce"}:
+        return nn.CrossEntropyLoss(
+            weight=weight,
+            label_smoothing=label_smoothing,
+        )
+    
+
+    if loss_name == "focal":
+        gamma = float(train_cfg.get("focal_gamma", 2.0))
+
+        return FocalLoss(
+            gamma=gamma,
+            weight=weight,
+            label_smoothing=label_smoothing,
+        )
+
+    raise ValueError(f"Unsupported loss: {loss_name}")
+
+def build_optimizer(model: nn.Module, config: dict[str, Any]) -> torch.optim.Optimizer:
+    train_cfg = config["train"]
+
+    optimizer_name = str(train_cfg.get("optimizer", "adamw")).lower()
+    lr = float(train_cfg.get("lr", 3e-4))
+    weight_decay = float(train_cfg.get("weight_decay", 1e-4))
+
+
+    decay_params = []
+    no_decay_params = []
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+
+        name_l = name.lower()
+        if param.ndim <= 1 or name_l.endswith(".bias") or "norm" in name_l or "bn" in name_l:
+            no_decay_params.append(param)
+        else:
+            decay_params.append(param)
+        
+        param_groups = [
+        {"params": decay_params, "weight_decay": weight_decay},
+        {"params": no_decay_params, "weight_decay": 0.0},
+        ]
+
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(param_groups, lr=lr)
+
+    if optimizer_name == "adam":
+        return torch.optim.Adam(param_groups, lr=lr)
+
+    raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
 def train_one_epoch(
     model: nn.Module,
@@ -356,16 +483,7 @@ def main() -> None:
     model = build_model_from_config(config).to(device)
     loss_fn = build_loss_fn(config, label_to_idx).to(device)
 
-    optimizer_name = str(config["train"].get("optimizer", "adamw")).lower()
-    lr = float(config["train"].get("lr", 3e-4))
-    weight_decay = float(config["train"].get("weight_decay", 1e-4))
-
-    if optimizer_name == "adamw":
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer_name == "adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    else:
-        raise ValueError(f"Unsupported optimizer: {optimizer_name}")
+    optimizer = build_optimizer(model, config)
 
     epochs = int(config["train"]["epochs"])
     artifact_dir = Path(config["project"].get("artifact_dir", "artifacts"))
