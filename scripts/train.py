@@ -569,6 +569,10 @@ def main() -> None:
     train_loader, val_loader, label_to_idx = build_dataloader(config)
 
     model = build_model_from_config(config).to(device)
+
+    if bool(config["train"].get("channels_last", False)) and device.type == "cuda":
+        model = model.to(memory_format=torch.channels_last)
+
     loss_fn = build_loss_fn(config, label_to_idx).to(device)
 
     optimizer = build_optimizer(model, config)
