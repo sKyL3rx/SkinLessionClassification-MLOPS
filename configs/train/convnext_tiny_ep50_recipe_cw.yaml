@@ -1,0 +1,91 @@
+project:
+  seed: 42
+  experiment_name: convnext_tiny_ep30_cw
+  artifact_dir: artifacts
+
+data:
+  raw_dir: data/raw/ham10000
+  external_dir: data/external
+  interim_dir: data/interim
+  processed_dir: data/processed
+  splits_dir: data/splits
+
+  metadata_csv: data/processed/metadata.csv
+  train_csv: data/splits/train.csv
+  val_csv: data/splits/val.csv
+  test_csv: data/splits/test.csv
+
+  image_size: 224
+  num_classes: 7
+  labels:
+    - akiec
+    - bcc
+    - bkl
+    - df
+    - mel
+    - nv
+    - vasc
+
+  val_size: 0.10
+  test_size: 0.10
+  group_by: split_group
+
+train:
+  backbone: convnext_tiny
+  pretrained: true
+
+  
+  batch_size: 128
+  num_workers: 4
+  epochs: 50
+
+  optimizer: adamw
+  lr: 0.0001
+  min_lr: 0.000001
+  weight_decay: 0.00005
+  scheduler: cosine_warmup
+  warmup_epochs: 3
+
+  loss: cross_entropy
+  class_weights: true
+  weighted_sampler: false
+  label_smoothing: 0.05
+
+  mixed_precision: true
+  channels_last: true
+  grad_clip_norm: 1.0
+
+  early_stopping: true
+  early_stopping_patience: 8
+  early_stopping_min_delta: 0.001
+
+augment:
+  use_random_resized_crop: false
+  crop_scale: [0.7, 1.0]
+  crop_ratio: [0.75, 1.33]
+
+  horizontal_flip_p: 0.5
+  vertical_flip_p: 0.5
+
+  shift_limit: 0.05
+  scale_limit: 0.10
+  rotate_limit: 45
+  geometric_p: 0.5
+
+  brightness: 0.2
+  contrast: 0.2
+  saturation: 0.2
+  hue: 0.05
+  color_jitter_p: 0.3
+
+  normalize: true
+
+evaluate:
+  primary_metric: macro_f1
+  top_k: 3
+  confidence_threshold: 0.65
+
+inference:
+  checkpoint_path: artifacts/models/best.ckpt
+  onnx_path: deployment/onnx/model.onnx
+  device: auto
