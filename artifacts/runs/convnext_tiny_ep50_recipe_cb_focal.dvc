@@ -1,0 +1,6 @@
+outs:
+- md5: 4db9e5f7ebb1af6b60f6c209e87a1751.dir
+  size: 446347699
+  nfiles: 10
+  hash: md5
+  path: convnext_tiny_ep50_recipe_cb_focal
