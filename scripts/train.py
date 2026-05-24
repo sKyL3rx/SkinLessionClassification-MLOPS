@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import time
 from pathlib import Path
@@ -13,16 +14,13 @@ import torch
 import torch.nn as nn
 import yaml
 from sklearn.metrics import accuracy_score, f1_score
+from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from lesion_ml.data.dataset import SkinLesionDataset
 from lesion_ml.data.transforms import build_transforms_from_config
 from lesion_ml.models.factory import build_model_from_config
-
 from lesion_ml.models.losses import FocalLoss
-
-import math
-from torch.optim.lr_scheduler import LambdaLR
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,10 +54,10 @@ def build_weighted_sampler(
     train_ds: SkinLesionDataset,
     label_to_idx: dict[str, int],
 ) -> WeightedRandomSampler:
-    labels = train_ds["label"].astype(str).str.lower().tolist()
+    labels = train_ds.df["label"].astype(str).str.lower().tolist()
     label_indices = [label_to_idx[label] for label in labels]
-    
-    counts = np.bincount(label_indices, min = len(label_to_idx))
+
+    counts = np.bincount(label_indices, minlength=len(label_to_idx))
     class_weights = 1.0 / np.maximum(counts, 1)
     sample_weights = np.array([class_weights[idx] for idx in label_indices], dtype=np.float64)
 
@@ -69,13 +67,15 @@ def build_weighted_sampler(
         replacement=True,
     )
 
-def build_dataloader(config: dict[str, Any]) -> DataLoader:
+
+def build_dataloader(
+    config: dict[str, Any],
+) -> tuple[DataLoader, DataLoader, dict[str, int]]:
     train_csv = config["data"]["train_csv"]
     val_csv = config["data"]["val_csv"]
 
     train_tfms = build_transforms_from_config(config, split="train")
     val_tfms = build_transforms_from_config(config, split="val")
-    use_weighted_sampler = bool(config["train"].get("weighted_sampler", False))
 
     train_ds = SkinLesionDataset(
         csv_path=train_csv,
@@ -98,7 +98,7 @@ def build_dataloader(config: dict[str, Any]) -> DataLoader:
     batch_size = int(config["train"]["batch_size"])
     num_workers = int(config["train"].get("num_workers", 0))
 
-
+    use_weighted_sampler = bool(config["train"].get("weighted_sampler", False))
     sampler = build_weighted_sampler(train_ds, label_to_idx) if use_weighted_sampler else None
 
     train_loader = DataLoader(
@@ -109,7 +109,7 @@ def build_dataloader(config: dict[str, Any]) -> DataLoader:
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
         persistent_workers=num_workers > 0,
-    )      
+    )
 
     val_loader = DataLoader(
         val_ds,
@@ -122,37 +122,37 @@ def build_dataloader(config: dict[str, Any]) -> DataLoader:
 
     return train_loader, val_loader, label_to_idx
 
+
 def compute_inverse_class_weights(
     train_csv: str,
     label_to_idx: dict[str, int],
-) -> torch.Tensor:  
+) -> torch.Tensor:
     df = pd.read_csv(train_csv)
     counts = df["label"].astype(str).str.lower().value_counts().to_dict()
 
     weights = []
-    for label_name, _idx in sorted(label_to_idx.items(), key = lambda x: x[1]):
+    for label_name, _idx in sorted(label_to_idx.items(), key=lambda x: x[1]):
         count = counts.get(label_name, 1)
         weights.append(1.0 / max(count, 1))
-    
+
     weights_t = torch.tensor(weights, dtype=torch.float32)
     weights_t = weights_t / weights_t.sum() * len(weights_t)
 
     return weights_t
+
 
 def compute_effective_num_weights(
     train_csv: str,
     label_to_idx: dict[str, int],
     beta: float = 0.999,
 ) -> torch.Tensor:
-    
     df = pd.read_csv(train_csv)
     counts_dict = df["label"].astype(str).str.lower().value_counts().to_dict()
 
     counts = []
-
-    for label_name, _idx in sorted(label_to_idx.items(), key = lambda x: x[1]):
+    for label_name, _idx in sorted(label_to_idx.items(), key=lambda x: x[1]):
         counts.append(max(int(counts_dict.get(label_name, 1)), 1))
-    
+
     counts_t = torch.tensor(counts, dtype=torch.float32)
     beta_t = torch.tensor(beta, dtype=torch.float32)
 
@@ -161,6 +161,7 @@ def compute_effective_num_weights(
     weights = weights / weights.sum() * len(weights)
 
     return weights
+
 
 def build_loss_fn(config: dict[str, Any], label_to_idx: dict[str, int]) -> nn.Module:
     train_cfg = config["train"]
@@ -188,7 +189,7 @@ def build_loss_fn(config: dict[str, Any], label_to_idx: dict[str, int]) -> nn.Mo
             weight=weight,
             label_smoothing=label_smoothing,
         )
-    
+
     if use_class_weights:
         weight = compute_inverse_class_weights(
             train_csv=train_csv,
@@ -200,7 +201,6 @@ def build_loss_fn(config: dict[str, Any], label_to_idx: dict[str, int]) -> nn.Mo
             weight=weight,
             label_smoothing=label_smoothing,
         )
-    
 
     if loss_name == "focal":
         gamma = float(train_cfg.get("focal_gamma", 2.0))
@@ -213,13 +213,13 @@ def build_loss_fn(config: dict[str, Any], label_to_idx: dict[str, int]) -> nn.Mo
 
     raise ValueError(f"Unsupported loss: {loss_name}")
 
+
 def build_optimizer(model: nn.Module, config: dict[str, Any]) -> torch.optim.Optimizer:
     train_cfg = config["train"]
 
     optimizer_name = str(train_cfg.get("optimizer", "adamw")).lower()
     lr = float(train_cfg.get("lr", 3e-4))
     weight_decay = float(train_cfg.get("weight_decay", 1e-4))
-
 
     decay_params = []
     no_decay_params = []
@@ -229,15 +229,16 @@ def build_optimizer(model: nn.Module, config: dict[str, Any]) -> torch.optim.Opt
             continue
 
         name_l = name.lower()
+
         if param.ndim <= 1 or name_l.endswith(".bias") or "norm" in name_l or "bn" in name_l:
             no_decay_params.append(param)
         else:
             decay_params.append(param)
-        
-        param_groups = [
+
+    param_groups = [
         {"params": decay_params, "weight_decay": weight_decay},
         {"params": no_decay_params, "weight_decay": 0.0},
-        ]
+    ]
 
     if optimizer_name == "adamw":
         return torch.optim.AdamW(param_groups, lr=lr)
@@ -247,35 +248,34 @@ def build_optimizer(model: nn.Module, config: dict[str, Any]) -> torch.optim.Opt
 
     raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
+
 def build_scheduler(
     optimizer: torch.optim.Optimizer,
     config: dict[str, Any],
     steps_per_epoch: int,
 ) -> LambdaLR | None:
-    
     train_cfg = config["train"]
 
     scheduler_name = str(train_cfg.get("scheduler", "none")).lower()
 
     if scheduler_name in {"none", "null", ""}:
         return None
-    
+
     if scheduler_name not in {"cosine", "cosine_warmup"}:
         raise ValueError(f"Unsupported scheduler: {scheduler_name}")
-    
+
     epochs = int(train_cfg["epochs"])
     lr = float(train_cfg.get("lr", 3e-4))
     min_lr = float(train_cfg.get("min_lr", 1e-6))
     warmup_epochs = int(train_cfg.get("warmup_epochs", 0))
 
-    total_steps = max( epochs * steps_per_epoch, 1)
+    total_steps = max(epochs * steps_per_epoch, 1)
     warmup_steps = max(warmup_epochs * steps_per_epoch, 0)
-
     min_lr_ratio = min_lr / lr
 
     def lr_lambda(step: int) -> float:
         if warmup_steps > 0 and step < warmup_steps:
-            return max(float(step + 1) / float(warmup_steps), 1)
+            return max(float(step + 1) / float(warmup_steps), 1e-8)
 
         progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
         progress = min(max(progress, 0.0), 1.0)
@@ -284,7 +284,8 @@ def build_scheduler(
         return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
     return LambdaLR(optimizer, lr_lambda=lr_lambda)
-    
+
+
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -295,34 +296,31 @@ def train_one_epoch(
     scaler: torch.amp.GradScaler,
     config: dict[str, Any],
 ) -> tuple[float, float, float, float, float]:
-    
     model.train()
 
     running_loss = 0.0
     all_targets: list[int] = []
     all_preds: list[int] = []
 
-
     use_amp = bool(config["train"].get("mixed_precision", False)) and device.type == "cuda"
     grad_clip_norm = float(config["train"].get("grad_clip_norm", 0.0))
     channels_last = bool(config["train"].get("channels_last", False)) and device.type == "cuda"
 
-
     start_time = time.time()
 
     for batch in loader:
-        images = batch["image"].to(device, non_blocking= True)
-        targets = batch["label"].to(device, non_blocking= True)
+        images = batch["image"].to(device, non_blocking=True)
+        targets = batch["label"].to(device, non_blocking=True)
 
         if channels_last:
             images = images.contiguous(memory_format=torch.channels_last)
 
         optimizer.zero_grad(set_to_none=True)
 
-        with torch.amp.autocast(device_type = device.type, enabled = use_amp):
+        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
             logits = model(images)
             loss = loss_fn(logits, targets)
-        
+
         if scaler.is_enabled():
             scaler.scale(loss).backward()
 
@@ -340,10 +338,8 @@ def train_one_epoch(
 
             optimizer.step()
 
-
         if scheduler is not None:
             scheduler.step()
-
 
         running_loss += loss.item() * images.size(0)
 
@@ -366,7 +362,7 @@ def evaluate(
     loader: DataLoader,
     loss_fn: nn.Module,
     device: torch.device,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, float]:
     model.eval()
 
     running_loss = 0.0
@@ -376,11 +372,10 @@ def evaluate(
     start_time = time.time()
 
     for batch in loader:
-        images = batch["image"].to(device)
-        targets = batch["label"].to(device)
+        images = batch["image"].to(device, non_blocking=True)
+        targets = batch["label"].to(device, non_blocking=True)
 
         logits = model(images)
-
         loss = loss_fn(logits, targets)
 
         running_loss += loss.item() * images.size(0)
@@ -393,6 +388,7 @@ def evaluate(
     epoch_acc = accuracy_score(all_targets, all_preds)
     epoch_f1 = f1_score(all_targets, all_preds, average="macro")
     epoch_time = time.time() - start_time
+
     return epoch_loss, epoch_acc, epoch_f1, epoch_time
 
 
@@ -433,7 +429,6 @@ def train(
     config: dict[str, Any],
     label_to_idx: dict[str, int],
 ) -> dict[str, Any]:
-    
     best_val_f1 = -1.0
     history: list[dict[str, Any]] = []
 
@@ -450,15 +445,15 @@ def train(
 
     for epoch in range(1, epochs + 1):
         train_loss, train_acc, train_f1, train_time, current_lr = train_one_epoch(
-                model=model,
-                loader=train_loader,
-                loss_fn=loss_fn,
-                optimizer=optimizer,
-                device=device,
-                scheduler=scheduler,
-                scaler = scaler,
-                config = config,
-            )
+            model=model,
+            loader=train_loader,
+            loss_fn=loss_fn,
+            optimizer=optimizer,
+            device=device,
+            scheduler=scheduler,
+            scaler=scaler,
+            config=config,
+        )
 
         val_loss, val_acc, val_f1, val_time = evaluate(
             model=model,
@@ -509,6 +504,7 @@ def train(
 
         print(
             f"[Epoch {epoch}/{epochs}] "
+            f"lr={current_lr:.8f} "
             f"train_loss={train_loss:.4f} "
             f"train_acc={train_acc:.4f} "
             f"train_f1={train_f1:.4f} | "
@@ -551,6 +547,7 @@ def train(
         "weighted_sampler": bool(config["train"].get("weighted_sampler", False)),
         "label_smoothing": float(config["train"].get("label_smoothing", 0.0)),
         "mixed_precision": bool(config["train"].get("mixed_precision", False)),
+        "channels_last": bool(config["train"].get("channels_last", False)),
         "grad_clip_norm": float(config["train"].get("grad_clip_norm", 0.0)),
         "checkpoint_path": str(ckpt_path),
         "history_csv": str(history_csv_path),
@@ -568,7 +565,6 @@ def main() -> None:
     config = load_config(args.config)
 
     seed = int(config["project"].get("seed", 42))
-
     set_seed(seed)
 
     device = get_device()
@@ -582,7 +578,6 @@ def main() -> None:
         model = model.to(memory_format=torch.channels_last)
 
     loss_fn = build_loss_fn(config, label_to_idx).to(device)
-
     optimizer = build_optimizer(model, config)
 
     scheduler = build_scheduler(
@@ -593,8 +588,6 @@ def main() -> None:
 
     use_amp = bool(config["train"].get("mixed_precision", False)) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
-    
-
 
     epochs = int(config["train"]["epochs"])
     artifact_dir = Path(config["project"].get("artifact_dir", "artifacts"))
@@ -608,14 +601,13 @@ def main() -> None:
         loss_fn=loss_fn,
         optimizer=optimizer,
         scheduler=scheduler,
-        scaler = scaler,
+        scaler=scaler,
         device=device,
         epochs=epochs,
         ckpt_path=ckpt_path,
         report_dir=report_dir,
         config=config,
         label_to_idx=label_to_idx,
-        
     )
 
     print("[INFO] Training finished.")
