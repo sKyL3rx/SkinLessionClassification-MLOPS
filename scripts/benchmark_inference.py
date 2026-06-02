@@ -118,11 +118,20 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writeheader()
         writer.writerows(rows)
 
+def get_onnx_artifact_size_mb(onnx_path: Path) -> float:
+    total_bytes = onnx_path.stat().st_size
+
+    external_data_path = onnx_path.with_name(onnx_path.name + ".data")
+    if external_data_path.exists():
+        total_bytes += external_data_path.stat().st_size
+
+    return float(total_bytes / 1024 / 1024)
 
 def main() -> None:
     args = parse_args()
 
     onnx_path = Path(args.onnx_path)
+    model_size_mb = get_onnx_artifact_size_mb(onnx_path)
 
     if not onnx_path.exists():
         raise FileNotFoundError(f"ONNX model not found: {onnx_path}")
@@ -130,7 +139,7 @@ def main() -> None:
     providers = choose_providers(args.provider)
 
     print(f"[INFO] ONNX path: {onnx_path}")
-    print(f"[INFO] ONNX model size: {onnx_path.stat().st_size / 1024 / 1024:.2f} MB")
+    print(f"[INFO] ONNX artifact size: {model_size_mb:.2f} MB")
     print(f"[INFO] Available providers: {ort.get_available_providers()}")
     print(f"[INFO] Requested provider: {args.provider}")
     print(f"[INFO] Using providers: {providers}")
@@ -162,7 +171,7 @@ def main() -> None:
             "backend": "onnxruntime",
             "providers": ",".join(session.get_providers()),
             "onnx_path": str(onnx_path),
-            "model_size_mb": float(onnx_path.stat().st_size / 1024 / 1024),
+            "model_size_mb": model_size_mb,
             "image_size": int(args.image_size),
             **row,
         }
