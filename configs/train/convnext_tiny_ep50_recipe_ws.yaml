@@ -1,6 +1,6 @@
 project:
   seed: 42
-  experiment_name: convnext_tiny_ep50_recipe_cw
+  experiment_name: convnext_tiny_ep50_recipe_ws
   artifact_dir: artifacts
 
 data:
@@ -34,7 +34,6 @@ train:
   backbone: convnext_tiny
   pretrained: true
 
-  
   batch_size: 128
   num_workers: 4
   epochs: 50
@@ -47,8 +46,8 @@ train:
   warmup_epochs: 3
 
   loss: cross_entropy
-  class_weights: true
-  weighted_sampler: false
+  class_weights: false
+  weighted_sampler: true
   label_smoothing: 0.05
 
   mixed_precision: true
