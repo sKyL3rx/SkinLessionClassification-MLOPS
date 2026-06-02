@@ -1,4 +1,4 @@
-.PHONY: setup prepare split train eval export serve mlflow-ui test lint format dvc-repro clean
+.PHONY: setup prepare split train eval export benchmark serve mlflow-ui test lint format dvc-repro clean 
 
 VENV := venv
 PYTHON := $(VENV)/bin/python
@@ -25,6 +25,9 @@ eval:
 
 export:
 	$(PYTHON) scripts/export_onnx.py --config $(CONFIG)
+
+benchmark:
+	$(PYTHON) scripts/benchmark_inference.py --onnx-path deployment/onnx/model.onnx
 
 archive-run:
 	$(PYTHON) scripts/archive_run.py --experiment-name $(EXP_NAME) --dvc-add
