@@ -1,6 +1,6 @@
 project:
   seed: 42
-  experiment_name: convnext_tiny_ep30_cw
+  experiment_name: convnext_tiny_ep50_recipe_cb_focal
   artifact_dir: artifacts
 
 data:
@@ -34,24 +34,30 @@ train:
   backbone: convnext_tiny
   pretrained: true
 
-  
   batch_size: 128
-  num_workers: 2
-  epochs: 30
+  num_workers: 4
+  epochs: 50
 
   optimizer: adamw
   lr: 0.0001
-  weight_decay: 0.0001
-  scheduler: cosine
+  min_lr: 0.000001
+  weight_decay: 0.00005
+  scheduler: cosine_warmup
+  warmup_epochs: 3
 
-  loss: cross_entropy
-  class_weights: true
+  loss: cb_focal
+  cb_beta: 0.999
+  focal_gamma: 1.5
+  class_weights: false
   weighted_sampler: false
+  label_smoothing: 0.0
 
   mixed_precision: true
+  channels_last: true
+  grad_clip_norm: 1.0
 
   early_stopping: true
-  early_stopping_patience: 5
+  early_stopping_patience: 8
   early_stopping_min_delta: 0.001
 
 augment:
@@ -75,12 +81,17 @@ augment:
 
   normalize: true
 
-evaluate:
-  primary_metric: macro_f1
-  top_k: 3
-  confidence_threshold: 0.65
-
 inference:
   checkpoint_path: artifacts/models/best.ckpt
   onnx_path: deployment/onnx/model.onnx
   device: auto
+
+evaluate:
+  primary_metric: macro_f1
+  top_k: 3
+  confidence_threshold: 0.95
+  use_tta: true
+  tta_transforms:
+    - original
+    - hflip
+    - vflip
