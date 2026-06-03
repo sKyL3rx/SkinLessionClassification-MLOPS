@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort
 
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark ONNX Runtime inference.")
     parser.add_argument("--onnx-path", type=str, default="deployment/onnx/model.onnx")

@@ -10,13 +10,14 @@ import yaml
 
 from lesion_ml.models.factory import build_model_from_config
 
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export trained PyTorch model to ONNX.")
     parser.add_argument("--config", type=str, default="params.yaml")
     return parser.parse_args()
 
 def load_config(path: str | Path) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 

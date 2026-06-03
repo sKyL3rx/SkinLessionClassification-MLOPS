@@ -4,11 +4,21 @@ import argparse
 import shutil
 from pathlib import Path
 
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Archive latest training artifacts into a named run folder.")
+    parser = argparse.ArgumentParser(
+    description=(
+        "Archive latest training artifacts "
+        "into a named run folder."
+        )
+    )
     parser.add_argument("--experiment-name", required=True, help="Name of the experiment/run.")
     parser.add_argument("--artifact-dir", default="artifacts", help="Root artifact directory.")
-    parser.add_argument("--onnx-path", default="deployment/onnx/model.onnx", help="Latest ONNX model path.")
+    parser.add_argument(
+    "--onnx-path",
+    default="deployment/onnx/model.onnx",
+    help="Latest ONNX model path.",
+    )
     parser.add_argument(
         "--dvc-add",
         action="store_true",

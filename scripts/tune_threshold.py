@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, f1_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score
 
 CRITICAL_LABELS = ["mel", "bcc", "akiec"]
 
@@ -124,7 +124,8 @@ def compute_threshold_metrics(df: pd.DataFrame, threshold: float) -> dict[str,An
             continue
 
         true_positive_predictions = (
-            (class_df["pred_label"] == label) & (needs_review[class_df.index] == False)
+            (class_df["pred_label"] == label)
+            & (~needs_review[class_df.index])
         ).sum()
 
         reviewed_positives = needs_review[class_df.index].sum()
@@ -133,7 +134,10 @@ def compute_threshold_metrics(df: pd.DataFrame, threshold: float) -> dict[str,An
         # Model can predict true label w/ high confidence + wrong/ right reviewed by experts
 
         row[f"{label}_support"] = int(len(class_df))
-        row[f"{label}_classifier_recall_all"] = float((class_df["pred_label"] == label).sum()) / len(class_df)
+        row[f"{label}_classifier_recall_all"] = (
+                float((class_df["pred_label"] == label).sum())
+                / len(class_df)
+                )
 
         row[f"{label}_review_rate"] = float(reviewed_positives / len(class_df))
 

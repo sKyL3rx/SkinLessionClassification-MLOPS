@@ -8,7 +8,6 @@ from typing import Any
 import pandas as pd
 import yaml
 
-
 LABELS = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"]
 
 
@@ -44,24 +43,6 @@ def parse_args() -> argparse.Namespace:
         help="Column used to sort experiments.",
     )
     return parser.parse_args()
-
-
-def load_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-
-    return data or {}
 
 def find_run_dirs(runs_dir: Path) -> list[Path]:
     if not runs_dir.exists():
@@ -253,8 +234,6 @@ def build_row(run_dir: Path) -> dict[str,Any]:
     train_metrics = load_json(train_metrics_path)
     test_metrics = load_json(test_metrics_path)
     params = load_yaml(params_path)
-
-    project_cfg = params.get("project", {})
     train_cfg = params.get("train", {})
 
     experiment_name = params.get("experiment_name", {})

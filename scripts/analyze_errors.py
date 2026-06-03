@@ -7,7 +7,6 @@ from typing import Any
 
 import pandas as pd
 
-
 LABELS = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"]
 CRITICAL_LABELS = ["mel", "bcc", "akiec"]
 
@@ -43,7 +42,10 @@ def parse_args() -> argparse.Namespace:
         "--confidence-threshold",
         type=float,
         default=None,
-        help="Override confidence threshold. If omitted, read from test_metrics.json when possible.",
+        help=(
+        "Override confidence threshold. "
+        "If omitted, read from test_metrics.json when possible."
+        ),
     )
     parser.add_argument(
         "--top-k",
@@ -195,7 +197,11 @@ def build_per_class_error_summary(df: pd.DataFrame, confidence_threshold: float)
                 "wrong": num_wrong,
                 "recall_from_predictions": recall,
                 "avg_confidence": subset["_confidence"].mean(),
-                "avg_confidence_correct": correct["_confidence"].mean() if not correct.empty else None,
+                "avg_confidence_correct": (
+                        correct["_confidence"].mean()
+                        if not correct.empty
+                        else None
+                ),
                 "avg_confidence_wrong": wrong["_confidence"].mean() if not wrong.empty else None,
                 "low_confidence_count": len(low_conf),
                 "low_confidence_rate": len(low_conf) / support if support else 0.0,

@@ -42,7 +42,7 @@ class SkinLessionONNXPredictor:
         onnx_path: str | Path = "deployment/onnx/model.onnx",
         metadata_path: str | Path | None = None,
         confidence_threshold: float = 0.65,
-    ) -> "SkinLessionONNXPredictor":
+    ) -> SkinLessionONNXPredictor:
         
         onnx_path = Path(onnx_path)
 
