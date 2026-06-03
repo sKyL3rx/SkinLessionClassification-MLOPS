@@ -29,6 +29,9 @@ export:
 benchmark:
 	$(PYTHON) scripts/benchmark_inference.py --onnx-path deployment/onnx/model.onnx
 
+serve:
+	$(PYTHON) -m uvicorn deployment.api.main:app --reload --host 0.0.0.0 --port 8000
+	
 archive-run:
 	$(PYTHON) scripts/archive_run.py --experiment-name $(EXP_NAME) --dvc-add
 
