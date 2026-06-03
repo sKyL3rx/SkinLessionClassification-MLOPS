@@ -1,26 +1,49 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
-import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-ONNX_PATH = Path("deployment/onnx/model.onnx")
+from deployment.api.main import app, get_predictor
 
-pytestmark = pytest.mark.skipif(
-    not ONNX_PATH.exists(),
-    reason = "ONNX model artifact is not available."
-)
 
-from deployment.api.main import app
+class FakePredictor:
+    def model_info(self) -> dict:
+        return {
+            "backend": "fake",
+            "onnx_path": "fake.onnx",
+            "labels": ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"],
+            "image_size": 224,
+            "confidence_threshold": 0.65,
+            "providers": ["FakeProvider"],
+            "input_name": "image",
+            "output_name": "logits",
+        }
 
+    def predict_pil(self, image, top_k: int = 3) -> dict:
+        return {
+            "predicted_class": "nv",
+            "confidence": 0.91,
+            "needs_review": False,
+            "top_k": [
+                {"label": "nv", "probability": 0.91},
+                {"label": "mel", "probability": 0.06},
+                {"label": "bkl", "probability": 0.03},
+            ][:top_k],
+            "model_backend": "fake",
+            "onnx_path": "fake.onnx",
+            "image_size": 224,
+            "confidence_threshold": 0.65,
+        }
+    
+def override_predictor() -> FakePredictor:
+    return FakePredictor()
+
+app.dependency_overrides[get_predictor] = override_predictor
 client = TestClient(app)
 
 def test_health() -> None:
     response = client.get("/health")
-    
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
@@ -31,13 +54,12 @@ def test_model_info() -> None:
 
     payload = response.json()
 
-    assert payload["backend"] == "onnxruntime"
+    assert payload["backend"] == "fake"
     assert "labels" in payload
     assert len(payload["labels"]) == 7
     assert "providers" in payload
     assert "input_name" in payload
     assert "output_name" in payload
-
 
 def test_predict_dummy_image(tmp_path) -> None:
     image_array = np.random.randint(
@@ -61,12 +83,10 @@ def test_predict_dummy_image(tmp_path) -> None:
 
     payload = response.json()
 
-    assert "predicted_class" in payload
-    assert "confidence" in payload
-    assert "needs_review" in payload
-    assert "top_k" in payload
+    assert payload["predicted_class"] == "nv"
+    assert payload["confidence"] == 0.91
+    assert payload["needs_review"] is False
     assert len(payload["top_k"]) == 3
-    assert 0.0 <= payload["confidence"] <= 1.0
 
 
 def test_predict_rejects_non_image_file(tmp_path) -> None:

@@ -62,11 +62,18 @@ pythonpath = [
 testpaths = [
   "tests"
 ]
-addopts = "-ra"
-
+addopts = "-ra --strict-markers"
+markers = [
+  "artifact: tests that require local model artifacts such as ONNX/checkpoints",
+  "data: tests that require real dataset files",
+  "slow: tests that are too slow for default CI"
+]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"deployment/api/main.py" = ["B008"]

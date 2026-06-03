@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import pytest
+import copy
+
 import torch
 import yaml
 
 from lesion_ml.models.factory import build_model, build_model_from_config
 
 
-@pytest.fixture(scope="module")
-def config() -> dict:
+def load_config() -> dict:
     with open("params.yaml", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
@@ -20,16 +20,19 @@ def test_build_model_resnet50() -> None:
         pretrained=False,
     )
 
-    x = torch.randn(2, 3, 224, 224)
+    x = torch.randn(1, 3, 224, 224)
+
     with torch.no_grad():
         out = model(x)
-    assert out.shape == (2, 7)
+    assert out.shape == (1, 7)
 
+def test_build_model_from_config() -> None:
+    config = copy.deepcopy(load_config())
+    config["train"]["pretrained"] = False
 
-def test_build_model_from_config(config: dict) -> None:
     model = build_model_from_config(config)
 
-    batch_size = 2
+    batch_size = 1
     image_size = int(config["data"]["image_size"])
     num_classes = int(config["data"]["num_classes"])
 
@@ -37,4 +40,5 @@ def test_build_model_from_config(config: dict) -> None:
 
     with torch.no_grad():
         out = model(x)
+
     assert out.shape == (batch_size, num_classes)
