@@ -10,6 +10,8 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
+from lesion_ml.data.metadata import MetadataSchema, encode_metadata_row
+
 DEFAULT_CLASS_ORDER = [
     "akiec",
     "bcc",
@@ -28,6 +30,7 @@ class SkinLesionDataset(Dataset):
         transform: Callable | None = None,
         label_to_idx: dict[str, int] | None = None,
         return_metadata: bool = False,
+        metadata_schema: MetadataSchema | None = None,
         validate_paths: bool = False,
     ) -> None:
         self.csv_path = Path(csv_path)
@@ -37,6 +40,10 @@ class SkinLesionDataset(Dataset):
         self.df = pd.read_csv(self.csv_path)
         self.transform = transform
         self.return_metadata = return_metadata
+        self.metadata_schema = metadata_schema
+
+        if self.return_metadata and self.metadata_schema is None:
+            raise ValueError("metadata_schema must be provided when return_metadata=True")
 
         self._validate_dataframe()
 
@@ -140,6 +147,7 @@ class SkinLesionDataset(Dataset):
         image = self._load_image(image_path)
         image_tensor = self._apply_transform(image)
         label_tensor = torch.tensor(label_idx, dtype=torch.long)
+        
         sample: dict[str, Any] = {
             "image": image_tensor,
             "label": label_tensor,
@@ -149,20 +157,18 @@ class SkinLesionDataset(Dataset):
         }
 
         if self.return_metadata:
-            metadata_keys = [
-                "lesion_id",
-                "dx_type",
-                "age",
-                "sex",
-                "anatom_site",
-                "dataset",
-                "split_group",
-                "split",
-            ]
-            metadata = {key: row[key] for key in metadata_keys if key in self.df.columns}
+            if self.metadata_schema is None:
+                raise ValueError("metadata_schema must be provided when return_metadata=True")
+            
+            metadata = encode_metadata_row(
+                row=row,
+                schema=self.metadata_schema,
+            )
 
-            sample["metadata"] = metadata
+            sample["metadata"] = torch.tensor(metadata, dtype=torch.float32)
+
         return sample
+            
 
 
 def build_label_mapping_from_csv(csv_path: str | Path) -> dict[str, int]:
