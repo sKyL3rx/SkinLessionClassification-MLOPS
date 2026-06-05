@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-
 import timm
-import torch.nn as nn
+
+from lesion_ml.models.fusion import MetadataFusionClassifier
 
 SUPPORTED_BACKBONES = {
     "resnet50": "resnet50",
@@ -35,40 +34,54 @@ def build_model(
     backbone: str,
     num_classes: int,
     pretrained: bool = True,
-    in_chans: int = 3,
-    drop_rate: float = 0.0,
-    drop_path_rate: float = 0.0,
-) -> nn.Module:
+    dropout: float = 0.0,
+    use_metadata: bool = False,
+    metadata_dim: int | None = None,
+    metadata_hidden_dim: int = 64,
+    fusion_hidden_dim: int = 256,
+):
+    if use_metadata:
+        if metadata_dim is None:
+            raise ValueError("metadata_dim must be provided when use_metadata=True")
 
-    model_name = get_real_model_name(backbone)
+        image_backbone = timm.create_model(
+            backbone,
+            pretrained=pretrained,
+            num_classes=0,
+            global_pool="avg",
+        )
 
-    model = timm.create_model(
-        model_name,
+        image_feature_dim = image_backbone.num_features
+
+        return MetadataFusionClassifier(
+            image_backbone=image_backbone,
+            image_feature_dim=image_feature_dim,
+            metadata_dim=metadata_dim,
+            num_classes=num_classes,
+            metadata_hidden_dim=metadata_hidden_dim,
+            fusion_hidden_dim=fusion_hidden_dim,
+            dropout=dropout,
+        )
+
+    return timm.create_model(
+        backbone,
         pretrained=pretrained,
         num_classes=num_classes,
-        in_chans=in_chans,
-        drop_rate=drop_rate,
-        drop_path_rate=drop_path_rate,
+        drop_rate=dropout,
     )
-    return model
 
 
-def build_model_from_config(config: dict[str, Any]) -> nn.Module:
-    train_cfg = config.get("train", {})
-    data_cfg = config.get("data", {})
-
-    backbone = str(train_cfg.get("backbone", "resnet50"))
-    pretrained = bool(train_cfg.get("pretrained", True))
-    in_chans = int(train_cfg.get("in_chans", 3))
-    drop_rate = float(train_cfg.get("drop_rate", 0.0))
-    drop_path_rate = float(train_cfg.get("drop_path_rate", 0.0))
-    num_classes = int(data_cfg["num_classes"])
+def build_model_from_config(config: dict):
+    train_cfg = config["train"]
+    data_cfg = config["data"]
 
     return build_model(
-        backbone=backbone,
-        num_classes=num_classes,
-        pretrained=pretrained,
-        in_chans=in_chans,
-        drop_rate=drop_rate,
-        drop_path_rate=drop_path_rate,
+        backbone=train_cfg["backbone"],
+        num_classes=int(data_cfg["num_classes"]),
+        pretrained=bool(train_cfg.get("pretrained", True)),
+        dropout=float(train_cfg.get("dropout", 0.0)),
+        use_metadata=bool(train_cfg.get("use_metadata", False)),
+        metadata_dim=train_cfg.get("metadata_dim"),
+        metadata_hidden_dim=int(train_cfg.get("metadata_hidden_dim", 64)),
+        fusion_hidden_dim=int(train_cfg.get("fusion_hidden_dim", 256)),
     )
