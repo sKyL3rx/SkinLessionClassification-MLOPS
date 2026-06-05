@@ -18,8 +18,10 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from lesion_ml.data.dataset import SkinLesionDataset
+from lesion_ml.data.metadata import MetadataSchema, build_metadata_schema
 from lesion_ml.data.transforms import build_transforms_from_config
 from lesion_ml.models.factory import build_model_from_config
+from lesion_ml.models.forward import forward_batch
 from lesion_ml.models.losses import FocalLoss
 
 
@@ -77,11 +79,20 @@ def build_dataloader(
     train_tfms = build_transforms_from_config(config, split="train")
     val_tfms = build_transforms_from_config(config, split="val")
 
+    use_metadata = bool(config["train"].get("use_metadata", False))
+    metadata_schema: MetadataSchema | None = None
+
+    if use_metadata:
+        metadata_schema = build_metadata_schema(train_csv)
+        config["train"]["metadata_dim"] = metadata_schema.dim
+        print(f"[INFO] Metadata fusion enabled. metadata_dim={metadata_schema.dim}")
+
     train_ds = SkinLesionDataset(
         csv_path=train_csv,
         transform=train_tfms,
         label_to_idx=None,
-        return_metadata=False,
+        return_metadata=use_metadata,
+        metadata_schema=metadata_schema,
         validate_paths=False,
     )
 
@@ -91,7 +102,8 @@ def build_dataloader(
         csv_path=val_csv,
         transform=val_tfms,
         label_to_idx=label_to_idx,
-        return_metadata=False,
+        return_metadata=use_metadata,
+        metadata_schema=metadata_schema,
         validate_paths=False,
     )
 
@@ -119,6 +131,7 @@ def build_dataloader(
         pin_memory=torch.cuda.is_available(),
         persistent_workers=num_workers > 0,
     )
+
 
     return train_loader, val_loader, label_to_idx
 
@@ -314,11 +327,17 @@ def train_one_epoch(
 
         if channels_last:
             images = images.contiguous(memory_format=torch.channels_last)
+            batch = dict(batch)
+            batch["image"] = images
 
         optimizer.zero_grad(set_to_none=True)
 
         with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-            logits = model(images)
+            logits = forward_batch(
+                model=model,
+                batch=batch,
+                device=device,
+            )
             loss = loss_fn(logits, targets)
 
         if scaler.is_enabled():
@@ -375,7 +394,14 @@ def evaluate(
         images = batch["image"].to(device, non_blocking=True)
         targets = batch["label"].to(device, non_blocking=True)
 
-        logits = model(images)
+        batch = dict(batch)
+        batch["image"] = images
+
+        logits = forward_batch(
+            model=model,
+            batch=batch,
+            device=device,
+        )
         loss = loss_fn(logits, targets)
 
         running_loss += loss.item() * images.size(0)
@@ -550,6 +576,10 @@ def train(
         "channels_last": bool(config["train"].get("channels_last", False)),
         "grad_clip_norm": float(config["train"].get("grad_clip_norm", 0.0)),
         "checkpoint_path": str(ckpt_path),
+        "use_metadata": bool(config["train"].get("use_metadata", False)),
+        "metadata_dim": config["train"].get("metadata_dim"),
+        "metadata_hidden_dim": int(config["train"].get("metadata_hidden_dim", 64)),
+        "fusion_hidden_dim": int(config["train"].get("fusion_hidden_dim", 256)),
         "history_csv": str(history_csv_path),
     }
 

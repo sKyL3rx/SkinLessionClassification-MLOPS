@@ -22,8 +22,10 @@ from sklearn.metrics import (
 from torch.utils.data import DataLoader
 
 from lesion_ml.data.dataset import SkinLesionDataset
+from lesion_ml.data.metadata import MetadataSchema, build_metadata_schema
 from lesion_ml.data.transforms import build_transforms_from_config
 from lesion_ml.models.factory import build_model_from_config
+from lesion_ml.models.forward import forward_batch
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,7 +35,7 @@ def parse_args() -> argparse.Namespace:
         "--split",
         default="test",
         choices=["train", "val", "test"],
-        help = "Data split to evaluate"
+        help="Data split to evaluate.",
     )
     return parser.parse_args()
 
@@ -67,35 +69,31 @@ def load_checkpoint(path: str | Path, device: torch.device) -> dict[str, Any]:
         return torch.load(checkpoint_path, map_location=device)
 
 
-def build_test_dataloader(
-    config: dict[str, Any],
-    label_to_idx: dict[str, int],
-) -> DataLoader:
-    test_csv = Path(config["data"]["test_csv"])
+def build_eval_config(
+    checkpoint_config: dict[str, Any],
+    runtime_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Use checkpoint config for model/data, but runtime config for eval/inference options."""
+    eval_config = copy.deepcopy(checkpoint_config)
 
-    if not test_csv.exists():
-        raise FileNotFoundError(f"Test CSV not found: {test_csv}")
+    if "evaluate" in runtime_config:
+        eval_config["evaluate"] = copy.deepcopy(runtime_config["evaluate"])
 
-    test_dataset = SkinLesionDataset(
-        csv_path=test_csv,
-        transform=build_transforms_from_config(config, split="test"),
-        label_to_idx=label_to_idx,
-        return_metadata=False,
-        validate_paths=False,
-    )
+    if "inference" in runtime_config:
+        eval_config["inference"] = copy.deepcopy(runtime_config["inference"])
 
-    return DataLoader(
-        test_dataset,
-        batch_size=int(config["train"].get("batch_size", 32)),
-        shuffle=False,
-        num_workers=int(config["train"].get("num_workers", 0)),
-        pin_memory=torch.cuda.is_available(),
-    )
+    if "project" in runtime_config:
+        eval_config.setdefault("project", {})
+        eval_config["project"].update(runtime_config["project"])
+
+    return eval_config
+
 
 def build_eval_dataloader(
-        config: dict[str,Any],
-        label_to_idx: dict[str, int],
-        split: str
+    config: dict[str, Any],
+    label_to_idx: dict[str, int],
+    split: str,
+    metadata_schema: MetadataSchema | None = None,
 ) -> DataLoader:
     split_to_csv_key = {
         "train": "train_csv",
@@ -108,12 +106,15 @@ def build_eval_dataloader(
 
     if not csv_path.exists():
         raise FileNotFoundError(f"{split} CSV not found: {csv_path}")
-    
+
+    use_metadata = bool(config["train"].get("use_metadata", False))
+
     dataset = SkinLesionDataset(
         csv_path=csv_path,
         transform=build_transforms_from_config(config, split="test"),
         label_to_idx=label_to_idx,
-        return_metadata=False,
+        return_metadata=use_metadata,
+        metadata_schema=metadata_schema,
         validate_paths=False,
     )
 
@@ -124,6 +125,7 @@ def build_eval_dataloader(
         num_workers=int(config["train"].get("num_workers", 0)),
         pin_memory=torch.cuda.is_available(),
     )
+
 
 def get_tta_config(config: dict[str, Any]) -> tuple[bool, list[str]]:
     eval_cfg = config.get("evaluate", {})
@@ -166,20 +168,34 @@ def apply_tta_transform(images: torch.Tensor, transform_name: str) -> torch.Tens
 @torch.no_grad()
 def predict_proba(
     model: torch.nn.Module,
-    images: torch.Tensor,
+    batch: dict[str, Any],
+    device: torch.device,
     config: dict[str, Any],
 ) -> torch.Tensor:
     use_tta, tta_transforms = get_tta_config(config)
 
     if not use_tta:
-        logits = model(images)
+        logits = forward_batch(
+            model=model,
+            batch=batch,
+            device=device,
+        )
         return torch.softmax(logits, dim=1)
 
     probs_sum: torch.Tensor | None = None
+    images = batch["image"].to(device, non_blocking=True)
 
     for transform_name in tta_transforms:
         images_tta = apply_tta_transform(images, transform_name)
-        logits = model(images_tta)
+
+        tta_batch = dict(batch)
+        tta_batch["image"] = images_tta
+
+        logits = forward_batch(
+            model=model,
+            batch=tta_batch,
+            device=device,
+        )
         probs = torch.softmax(logits, dim=1)
 
         if probs_sum is None:
@@ -217,12 +233,12 @@ def predict(
     start_time = time.time()
 
     for batch in loader:
-        images = batch["image"].to(device, non_blocking=True)
         targets = batch["label"].detach().cpu().numpy()
 
         probs = predict_proba(
             model=model,
-            images=images,
+            batch=batch,
+            device=device,
             config=config,
         ).detach().cpu().numpy()
 
@@ -232,10 +248,10 @@ def predict(
         all_image_paths.extend(list(batch["image_path"]))
 
     if not all_probs:
-        raise RuntimeError("No predictions were generated. Check the test dataloader.")
+        raise RuntimeError("No predictions were generated. Check the eval dataloader.")
 
     dur_time = time.time() - start_time
-    print(f"[INFO] Test inference finished in: {dur_time:.2f}s")
+    print(f"[INFO] Evaluation inference finished in: {dur_time:.2f}s")
 
     return (
         np.concatenate(all_probs, axis=0),
@@ -316,8 +332,6 @@ def save_eval_artifacts(
             row[f"top_{rank + 1}_label"] = idx_to_label[class_idx]
             row[f"top_{rank + 1}_prob"] = float(probs[i, class_idx])
 
-        # Full probability vector for calibration, ensembling, stacking,
-        # and deeper error analysis.
         for class_idx in class_indices:
             class_name = idx_to_label[class_idx]
             row[f"prob_{class_name}"] = float(probs[i, class_idx])
@@ -396,14 +410,14 @@ def make_eval_metadata(config: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> None:
     args = parse_args()
-    config = load_config(args.config)
+    runtime_config = load_config(args.config)
     split = args.split
 
-    artifact_dir = Path(config["project"].get("artifact_dir", "artifacts"))
+    artifact_dir = Path(runtime_config["project"].get("artifact_dir", "artifacts"))
     report_dir = artifact_dir / "reports"
 
-    checkpoint_path = Path(config["inference"]["checkpoint_path"])
-    device = get_device(config)
+    checkpoint_path = Path(runtime_config["inference"]["checkpoint_path"])
+    device = get_device(runtime_config)
 
     print(f"[INFO] Using device: {device}")
     print(f"[INFO] Loading checkpoint: {checkpoint_path}")
@@ -413,40 +427,58 @@ def main() -> None:
     label_to_idx = checkpoint["label_to_idx"]
     idx_to_label = {int(idx): str(label) for label, idx in label_to_idx.items()}
 
-    run_name, model_metadata = make_run_metadata(
-        config=config,
-        checkpoint=checkpoint,
-        checkpoint_path=checkpoint_path,
-        split = split
+    checkpoint_config = copy.deepcopy(checkpoint.get("config", runtime_config))
+    checkpoint_config.setdefault("train", {})
+    checkpoint_config["train"]["pretrained"] = False
+
+    eval_config = build_eval_config(
+        checkpoint_config=checkpoint_config,
+        runtime_config=runtime_config,
     )
 
-    eval_metadata = make_eval_metadata(config)
+    use_metadata = bool(eval_config["train"].get("use_metadata", False))
+    metadata_schema: MetadataSchema | None = None
 
+    if use_metadata:
+        metadata_schema = build_metadata_schema(eval_config["data"]["train_csv"])
+        eval_config["train"]["metadata_dim"] = metadata_schema.dim
+        print(f"[INFO] Metadata fusion enabled. metadata_dim={metadata_schema.dim}")
+
+    run_name, model_metadata = make_run_metadata(
+        config=eval_config,
+        checkpoint=checkpoint,
+        checkpoint_path=checkpoint_path,
+        split=split,
+    )
+
+    model_metadata["use_metadata"] = use_metadata
+    model_metadata["metadata_dim"] = eval_config["train"].get("metadata_dim")
+    model_metadata["metadata_hidden_dim"] = eval_config["train"].get("metadata_hidden_dim")
+    model_metadata["fusion_hidden_dim"] = eval_config["train"].get("fusion_hidden_dim")
+
+    eval_metadata = make_eval_metadata(eval_config)
     run_report_dir = report_dir / "runs" / run_name
 
-    model_config = copy.deepcopy(checkpoint.get("config", config))
-    model_config["train"]["pretrained"] = False
-
-    model = build_model_from_config(model_config).to(device)
+    model = build_model_from_config(eval_config).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
 
     eval_loader = build_eval_dataloader(
-        config=config,
+        config=eval_config,
         label_to_idx=label_to_idx,
         split=split,
+        metadata_schema=metadata_schema,
     )
 
     probs, targets, image_ids, image_paths = predict(
         model=model,
         loader=eval_loader,
         device=device,
-        config=config,
+        config=eval_config,
     )
 
-    top_k = int(config["evaluate"].get("top_k", 3))
-    confidence_threshold = float(config["evaluate"].get("confidence_threshold", 0.65))
+    top_k = int(eval_config["evaluate"].get("top_k", 3))
+    confidence_threshold = float(eval_config["evaluate"].get("confidence_threshold", 0.65))
 
-    # 1. Latest artifacts
     metrics = save_eval_artifacts(
         report_dir=report_dir,
         probs=probs,
@@ -460,7 +492,6 @@ def main() -> None:
         eval_metadata=eval_metadata,
     )
 
-    # 2. Versioned artifacts
     save_eval_artifacts(
         report_dir=run_report_dir,
         probs=probs,
