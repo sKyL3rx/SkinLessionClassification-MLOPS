@@ -10,6 +10,7 @@ import pandas as pd
 
 UNKNOWN_TOKEN = "__unknown__"
 
+
 @dataclass(frozen=True)
 class MetadataSchema:
     age_median: float
@@ -21,7 +22,8 @@ class MetadataSchema:
     @property
     def dim(self) -> int:
         return 1 + len(self.sex_categories) + len(self.anatom_site_categories)
-    
+
+
 def clean_category(value: Any) -> str:
     if pd.isna(value):
         return UNKNOWN_TOKEN
@@ -32,6 +34,7 @@ def clean_category(value: Any) -> str:
         return UNKNOWN_TOKEN
 
     return value_str
+
 
 def build_metadata_schema(
     train_csv: str | Path,
@@ -57,7 +60,7 @@ def build_metadata_schema(
 
     if not np.isfinite(age_std) or age_std <= 0:
         age_std = 1.0
-    
+
     sex_categories = sorted({clean_category(value) for value in df[sex_col].tolist()})
 
     anatom_site_categories = sorted(
@@ -77,6 +80,7 @@ def build_metadata_schema(
         sex_categories=sex_categories,
         anatom_site_categories=anatom_site_categories,
     )
+
 
 def encode_metadata_row(
     row: pd.Series,
@@ -98,9 +102,7 @@ def encode_metadata_row(
     if sex_value not in schema.sex_categories:
         sex_value = UNKNOWN_TOKEN
 
-    features.extend(
-        [1.0 if category == sex_value else 0.0 for category in schema.sex_categories]
-    )
+    features.extend([1.0 if category == sex_value else 0.0 for category in schema.sex_categories])
 
     anatom_site_value = clean_category(row.get(anatom_site_col))
     if anatom_site_value not in schema.anatom_site_categories:
@@ -114,6 +116,7 @@ def encode_metadata_row(
     )
 
     return np.asarray(features, dtype=np.float32)
+
 
 def save_metadata_schema(schema: MetadataSchema, path: str | Path) -> None:
     path = Path(path)

@@ -48,6 +48,7 @@ def create_dummy_metadata_dataset(tmp_path: Path) -> Path:
 
     return csv_path
 
+
 def test_dataset_return_metadata_tensor(tmp_path: Path) -> None:
     csv_path = create_dummy_metadata_dataset(tmp_path)
 
@@ -69,6 +70,7 @@ def test_dataset_return_metadata_tensor(tmp_path: Path) -> None:
     assert isinstance(sample["metadata"], torch.Tensor)
     assert sample["metadata"].dtype == torch.float32
     assert sample["metadata"].shape == (metadata_schema.dim,)
+
 
 def test_dataloader_collates_metadata_batch(tmp_path: Path) -> None:
     csv_path = create_dummy_metadata_dataset(tmp_path)

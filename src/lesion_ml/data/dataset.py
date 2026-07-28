@@ -11,6 +11,7 @@ import torch
 from torch.utils.data import Dataset
 
 from lesion_ml.data.metadata import MetadataSchema, encode_metadata_row
+from lesion_ml.data.preprocess import apply_preprocess
 
 DEFAULT_CLASS_ORDER = [
     "akiec",
@@ -32,6 +33,9 @@ class SkinLesionDataset(Dataset):
         return_metadata: bool = False,
         metadata_schema: MetadataSchema | None = None,
         validate_paths: bool = False,
+        preprocess_mode: str = "none",
+        lesion_crop_margin: float = 0.20,
+        dark_border_threshold: int = 10,
     ) -> None:
         self.csv_path = Path(csv_path)
         if not self.csv_path.exists():
@@ -60,6 +64,10 @@ class SkinLesionDataset(Dataset):
 
         if validate_paths:
             self._validate_image_paths()
+
+        self.preprocess_mode = preprocess_mode
+        self.lesion_crop_margin = lesion_crop_margin
+        self.dark_border_threshold = dark_border_threshold
 
     def _validate_dataframe(self) -> None:
         required_cols = {"image_id", "image_path", "label"}
@@ -145,9 +153,17 @@ class SkinLesionDataset(Dataset):
         label_idx = self.label_to_idx[label_name]
 
         image = self._load_image(image_path)
+
+        image = apply_preprocess(
+            image=image,
+            mode=self.preprocess_mode,
+            lesion_crop_margin=self.lesion_crop_margin,
+            dark_border_threshold=self.dark_border_threshold,
+        )
+
         image_tensor = self._apply_transform(image)
         label_tensor = torch.tensor(label_idx, dtype=torch.long)
-        
+
         sample: dict[str, Any] = {
             "image": image_tensor,
             "label": label_tensor,
@@ -159,7 +175,7 @@ class SkinLesionDataset(Dataset):
         if self.return_metadata:
             if self.metadata_schema is None:
                 raise ValueError("metadata_schema must be provided when return_metadata=True")
-            
+
             metadata = encode_metadata_row(
                 row=row,
                 schema=self.metadata_schema,
@@ -168,7 +184,6 @@ class SkinLesionDataset(Dataset):
             sample["metadata"] = torch.tensor(metadata, dtype=torch.float32)
 
         return sample
-            
 
 
 def build_label_mapping_from_csv(csv_path: str | Path) -> dict[str, int]:

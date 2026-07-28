@@ -32,15 +32,14 @@ def test_build_schema_and_encode_row(tmp_path: Path) -> None:
     assert schema.age_median == 52.5
     assert UNKNOWN_TOKEN in schema.sex_categories
     assert UNKNOWN_TOKEN in schema.anatom_site_categories
-    assert schema.dim == 1 + len(schema.sex_categories) + len(
-        schema.anatom_site_categories
-    )
+    assert schema.dim == 1 + len(schema.sex_categories) + len(schema.anatom_site_categories)
 
     encoded = encode_metadata_row(df.iloc[0], schema)
 
     assert encoded.shape == (schema.dim,)
     assert encoded.dtype == np.float32
     assert np.isfinite(encoded).all()
+
 
 def test_metadata_schema_handles_unseen_categories(tmp_path: Path) -> None:
     csv_path = tmp_path / "train.csv"
@@ -67,6 +66,7 @@ def test_metadata_schema_handles_unseen_categories(tmp_path: Path) -> None:
 
     assert encoded.shape == (schema.dim,)
     assert np.isfinite(encoded).all()
+
 
 def test_metadata_schema_save_and_load(tmp_path: Path) -> None:
     csv_path = tmp_path / "train.csv"

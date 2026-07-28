@@ -3,10 +3,46 @@ from __future__ import annotations
 from typing import Any
 
 import albumentations as A
+import cv2
 from albumentations.pytorch import ToTensorV2
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+def build_resize_transforms(
+    image_size: int,
+    resize_mode: str = "resize_pad",
+) -> list[Any]:
+    """Build resize transforms.
+
+    resize:
+        Directly resize to image_size x image_size. 
+
+    resize_pad:
+        Preserve aspect ratio with LongestMaxSize, then pad to image_size x image_size.
+    """
+    resize_mode = resize_mode.lower().strip()
+
+    if resize_mode == "resize":
+        return [
+            A.Resize(height=image_size, width=image_size),
+        ]
+
+    if resize_mode == "resize_pad":
+        return [
+            A.LongestMaxSize(max_size=image_size),
+            A.PadIfNeeded(
+                min_height=image_size,
+                min_width=image_size,
+                border_mode=cv2.BORDER_CONSTANT,
+                fill=(0, 0, 0),
+            ),
+        ]
+
+    raise ValueError(
+        f"Unsupported resize_mode='{resize_mode}'. Supported values: resize, resize_pad"
+    )
 
 
 def get_train_transforms(
@@ -26,11 +62,10 @@ def get_train_transforms(
     hue: float = 0.05,
     color_jitter_p: float = 0.3,
     normalize: bool = True,
+    resize_mode: str = "resize_pad",
 ) -> A.Compose:
-
     transforms: list[Any] = []
 
-    # Random crop or resize
     if use_random_resized_crop:
         transforms.append(
             A.RandomResizedCrop(
@@ -41,17 +76,31 @@ def get_train_transforms(
             )
         )
     else:
-        transforms.append(A.Resize(height=image_size, width=image_size))
+        transforms.extend(
+            build_resize_transforms(
+                image_size=image_size,
+                resize_mode=resize_mode,
+            )
+        )
 
     transforms.extend(
         [
             A.HorizontalFlip(p=horizontal_flip_p),
             A.VerticalFlip(p=vertical_flip_p),
-            A.ShiftScaleRotate(
-                shift_limit=shift_limit,
-                scale_limit=scale_limit,
-                rotate_limit=rotate_limit,
-                border_mode=0,
+            A.Affine(
+                translate_percent={
+                    "x": (-shift_limit, shift_limit),
+                    "y": (-shift_limit, shift_limit),
+                },
+                scale={
+                    "x": (1.0 - scale_limit, 1.0 + scale_limit),
+                    "y": (1.0 - scale_limit, 1.0 + scale_limit),
+                },
+                rotate=(-rotate_limit, rotate_limit),
+                shear={"x": (0.0, 0.0), "y": (0.0, 0.0)},
+                interpolation=cv2.INTER_LINEAR,
+                border_mode=cv2.BORDER_CONSTANT,
+                fill=(0, 0, 0),
                 p=geometric_p,
             ),
             A.ColorJitter(
@@ -67,7 +116,12 @@ def get_train_transforms(
     if normalize:
         transforms.append(A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD))
     else:
-        transforms.append(A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)))
+        transforms.append(
+            A.Normalize(
+                mean=(0.0, 0.0, 0.0),
+                std=(1.0, 1.0, 1.0),
+            )
+        )
 
     transforms.append(ToTensorV2())
     return A.Compose(transforms)
@@ -76,15 +130,26 @@ def get_train_transforms(
 def get_eval_transforms(
     image_size: int = 224,
     normalize: bool = True,
+    resize_mode: str = "resize_pad",
 ) -> A.Compose:
-    transforms: list[Any] = [
-        A.Resize(height=image_size, width=image_size),
-    ]
+    transforms: list[Any] = []
+
+    transforms.extend(
+        build_resize_transforms(
+            image_size=image_size,
+            resize_mode=resize_mode,
+        )
+    )
 
     if normalize:
         transforms.append(A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD))
     else:
-        transforms.append(A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)))
+        transforms.append(
+            A.Normalize(
+                mean=(0.0, 0.0, 0.0),
+                std=(1.0, 1.0, 1.0),
+            )
+        )
 
     transforms.append(ToTensorV2())
     return A.Compose(transforms)
@@ -93,28 +158,39 @@ def get_eval_transforms(
 def get_tta_transforms(
     image_size: int = 224,
     normalize: bool = True,
+    resize_mode: str = "resize_pad",
 ) -> list[A.Compose]:
-    """
-    TTA nhẹ cho v2:
+    """Light TTA.
+
     - original
     - hflip
     - vflip
     - hflip + vflip
+.
     """
-    base = [
-        A.Resize(height=image_size, width=image_size),
-    ]
+    resize_transforms = build_resize_transforms(
+        image_size=image_size,
+        resize_mode=resize_mode,
+    )
 
+    normalize_transforms: list[Any] = []
     if normalize:
-        base.append(A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD))
+        normalize_transforms.append(A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD))
     else:
-        base.append(A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)))
+        normalize_transforms.append(
+            A.Normalize(
+                mean=(0.0, 0.0, 0.0),
+                std=(1.0, 1.0, 1.0),
+            )
+        )
+
+    tail = normalize_transforms + [ToTensorV2()]
 
     return [
-        A.Compose(base + [ToTensorV2()]),
-        A.Compose([A.HorizontalFlip(p=1.0)] + base + [ToTensorV2()]),
-        A.Compose([A.VerticalFlip(p=1.0)] + base + [ToTensorV2()]),
-        A.Compose([A.HorizontalFlip(p=1.0), A.VerticalFlip(p=1.0)] + base + [ToTensorV2()]),
+        A.Compose(resize_transforms + tail),
+        A.Compose([A.HorizontalFlip(p=1.0)] + resize_transforms + tail),
+        A.Compose([A.VerticalFlip(p=1.0)] + resize_transforms + tail),
+        A.Compose([A.HorizontalFlip(p=1.0), A.VerticalFlip(p=1.0)] + resize_transforms + tail),
     ]
 
 
@@ -123,8 +199,11 @@ def build_transforms_from_config(config: dict[str, Any], split: str) -> A.Compos
     normalize = bool(config.get("augment", {}).get("normalize", True))
     split = split.lower()
 
+    aug = config.get("augment", {})
+    preprocess = config.get("preprocess", {})
+    resize_mode = str(preprocess.get("resize_mode", "resize_pad"))
+
     if split == "train":
-        aug = config.get("augment", {})
         return get_train_transforms(
             image_size=image_size,
             use_random_resized_crop=bool(aug.get("use_random_resized_crop", False)),
@@ -142,12 +221,14 @@ def build_transforms_from_config(config: dict[str, Any], split: str) -> A.Compos
             hue=float(aug.get("hue", 0.05)),
             color_jitter_p=float(aug.get("color_jitter_p", 0.3)),
             normalize=normalize,
+            resize_mode=resize_mode,
         )
 
     if split in {"val", "valid", "validation", "test"}:
         return get_eval_transforms(
             image_size=image_size,
             normalize=normalize,
+            resize_mode=resize_mode,
         )
 
     raise ValueError(f"Unsupported split: {split}")

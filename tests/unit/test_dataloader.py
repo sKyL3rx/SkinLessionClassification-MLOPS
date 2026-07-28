@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 from lesion_ml.data.dataset import SkinLesionDataset, build_label_mapping_from_csv
 from lesion_ml.data.transforms import build_transforms_from_config
 
+pytestmark = pytest.mark.data
+
 
 @pytest.fixture(scope="module")
 def config() -> dict:
