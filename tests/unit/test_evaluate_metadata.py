@@ -14,8 +14,9 @@ class MetadataEvalModel(nn.Module):
         logits[:, 1] = metadata[:, 0]
         return logits
 
+
 def test_get_tta_config_disables_transforms_when_use_tta_false() -> None:
-    config: dict[str,Any] = {
+    config: dict[str, Any] = {
         "evaluate": {
             "use_tta": False,
             "tta_transforms": ["original", "hflip", "vflip"],
@@ -27,12 +28,14 @@ def test_get_tta_config_disables_transforms_when_use_tta_false() -> None:
     assert use_tta is False
     assert transforms == ["original"]
 
+
 def test_apply_tta_hflip() -> None:
-    images = torch.arange(1*1*2*3).reshape(1,1,2,3)
+    images = torch.arange(1 * 1 * 2 * 3).reshape(1, 1, 2, 3)
 
     flipped = apply_tta_transform(images, "hflip")
 
     assert torch.equal(flipped, torch.flip(images, dims=[3]))
+
 
 def test_predict_proba_metadata_with_tta() -> None:
     model = MetadataEvalModel()

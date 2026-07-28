@@ -26,23 +26,96 @@ from lesion_ml.data.metadata import MetadataSchema, build_metadata_schema
 from lesion_ml.data.transforms import build_transforms_from_config
 from lesion_ml.models.factory import build_model_from_config
 from lesion_ml.models.forward import forward_batch
+from lesion_ml.paths import get_project_paths
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate trained skin lesion model.")
-    parser.add_argument("--config", type=str, default="params.yaml")
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="params.yaml",
+        help="Path to evaluation/training config YAML.",
+    )
+
     parser.add_argument(
         "--split",
         default="test",
         choices=["train", "val", "test"],
         help="Data split to evaluate.",
     )
+
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help=(
+            "Directory where evaluation artifacts will be saved. "
+            "If provided, the directory must already exist unless "
+            "--create-output-dir is also passed. "
+            "If omitted, defaults to <artifact_dir>/reports."
+        ),
+    )
+
+    parser.add_argument(
+        "--create-output-dir",
+        action="store_true",
+        help=(
+            "Create --output-dir if it does not exist. "
+            "Without this flag, --output-dir must already exist."
+        ),
+    )
+
+    parser.add_argument(
+        "--save-versioned",
+        action="store_true",
+        help=(
+            "Also save a timestamped copy under <output_dir>/runs/<run_name>. "
+            "By default, only direct files are saved into --output-dir."
+        ),
+    )
+
     return parser.parse_args()
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def resolve_output_dir(
+    args: argparse.Namespace,
+    runtime_config: dict[str, Any],
+) -> Path:
+    """Resolve where evaluation files should be written.
+
+    Behavior:
+    - If --output-dir is omitted:
+        use <artifact_dir>/reports and create it if needed.
+    - If --output-dir is provided:
+        require it to already exist unless --create-output-dir is passed.
+    """
+    if args.output_dir is None:
+        output_dir = get_project_paths(runtime_config).reports_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir
+
+    output_dir = Path(args.output_dir).expanduser()
+
+    if output_dir.exists() and not output_dir.is_dir():
+        raise NotADirectoryError(f"--output-dir exists but is not a directory: {output_dir}")
+
+    if not output_dir.exists():
+        if args.create_output_dir:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            raise FileNotFoundError(
+                f"--output-dir does not exist: {output_dir}\n"
+                "Create it first, or pass --create-output-dir."
+            )
+
+    return output_dir
 
 
 def get_device(config: dict[str, Any]) -> torch.device:
@@ -82,6 +155,9 @@ def build_eval_config(
     if "inference" in runtime_config:
         eval_config["inference"] = copy.deepcopy(runtime_config["inference"])
 
+    if "preprocess" in runtime_config:
+        eval_config["preprocess"] = copy.deepcopy(runtime_config["preprocess"])
+
     if "project" in runtime_config:
         eval_config.setdefault("project", {})
         eval_config["project"].update(runtime_config["project"])
@@ -109,6 +185,19 @@ def build_eval_dataloader(
 
     use_metadata = bool(config["train"].get("use_metadata", False))
 
+    preprocess_cfg = config.get("preprocess", {})
+    preprocess_mode = str(preprocess_cfg.get("mode", "none"))
+    lesion_crop_margin = float(preprocess_cfg.get("lesion_crop_margin", 0.20))
+    dark_border_threshold = int(preprocess_cfg.get("dark_border_threshold", 10))
+
+    print(
+        "[INFO] Preprocess: "
+        f"mode={preprocess_mode}, "
+        f"resize_mode={preprocess_cfg.get('resize_mode', 'resize_pad')}, "
+        f"lesion_crop_margin={lesion_crop_margin}, "
+        f"dark_border_threshold={dark_border_threshold}"
+    )
+
     dataset = SkinLesionDataset(
         csv_path=csv_path,
         transform=build_transforms_from_config(config, split="test"),
@@ -116,6 +205,9 @@ def build_eval_dataloader(
         return_metadata=use_metadata,
         metadata_schema=metadata_schema,
         validate_paths=False,
+        preprocess_mode=preprocess_mode,
+        lesion_crop_margin=lesion_crop_margin,
+        dark_border_threshold=dark_border_threshold,
     )
 
     return DataLoader(
@@ -235,12 +327,17 @@ def predict(
     for batch in loader:
         targets = batch["label"].detach().cpu().numpy()
 
-        probs = predict_proba(
-            model=model,
-            batch=batch,
-            device=device,
-            config=config,
-        ).detach().cpu().numpy()
+        probs = (
+            predict_proba(
+                model=model,
+                batch=batch,
+                device=device,
+                config=config,
+            )
+            .detach()
+            .cpu()
+            .numpy()
+        )
 
         all_probs.append(probs)
         all_targets.extend(targets.tolist())
@@ -272,6 +369,7 @@ def save_eval_artifacts(
     confidence_threshold: float,
     model_metadata: dict[str, Any],
     eval_metadata: dict[str, Any],
+    split: str,
 ) -> dict[str, Any]:
     report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -303,12 +401,12 @@ def save_eval_artifacts(
         }
     )
 
-    per_class_path = report_dir / "per_class_metrics.csv"
+    per_class_path = report_dir / f"{split}_per_class_metrics.csv"
     per_class_df.to_csv(per_class_path, index=False)
 
     cm = confusion_matrix(targets, preds, labels=class_indices)
     cm_df = pd.DataFrame(cm, index=class_names, columns=class_names)
-    cm_path = report_dir / "confusion_matrix.csv"
+    cm_path = report_dir / f"{split}_confusion_matrix.csv"
     cm_df.to_csv(cm_path)
 
     top_k = min(top_k, probs.shape[1])
@@ -338,7 +436,7 @@ def save_eval_artifacts(
 
         prediction_rows.append(row)
 
-    predictions_path = report_dir / "predictions.csv"
+    predictions_path = report_dir / f"{split}_predictions.csv"
     pd.DataFrame(prediction_rows).to_csv(predictions_path, index=False)
 
     metrics = {
@@ -355,10 +453,11 @@ def save_eval_artifacts(
         "confusion_matrix_csv": str(cm_path),
         "predictions_csv": str(predictions_path),
     }
+
     metrics.update(model_metadata)
     metrics.update(eval_metadata)
 
-    metrics_path = report_dir / "test_metrics.json"
+    metrics_path = report_dir / f"{split}_metrics.json"
 
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
@@ -391,9 +490,15 @@ def make_run_metadata(
         "checkpoint_path": str(checkpoint_path),
         "checkpoint_epoch": epoch,
         "best_val_macro_f1": best_val_macro_f1,
+        "checkpoint_source": checkpoint.get("checkpoint_source"),
+        "model_ema": checkpoint.get("model_ema"),
         "evaluation_split": str(config["data"][f"{split}_csv"]),
         "split": split,
     }
+
+    project = config.get("project", {})
+    if "experiment_name" in project:
+        model_metadata["experiment_name"] = project["experiment_name"]
 
     return run_name, model_metadata
 
@@ -413,14 +518,15 @@ def main() -> None:
     runtime_config = load_config(args.config)
     split = args.split
 
-    artifact_dir = Path(runtime_config["project"].get("artifact_dir", "artifacts"))
-    report_dir = artifact_dir / "reports"
+    report_dir = resolve_output_dir(args, runtime_config)
 
-    checkpoint_path = Path(runtime_config["inference"]["checkpoint_path"])
+    paths = get_project_paths(runtime_config)
+    checkpoint_path = paths.checkpoint_path
     device = get_device(runtime_config)
 
     print(f"[INFO] Using device: {device}")
     print(f"[INFO] Loading checkpoint: {checkpoint_path}")
+    print(f"[INFO] Output directory: {report_dir}")
 
     checkpoint = load_checkpoint(checkpoint_path, device)
 
@@ -490,24 +596,30 @@ def main() -> None:
         confidence_threshold=confidence_threshold,
         model_metadata=model_metadata,
         eval_metadata=eval_metadata,
+        split=split,
     )
 
-    save_eval_artifacts(
-        report_dir=run_report_dir,
-        probs=probs,
-        targets=targets,
-        image_ids=image_ids,
-        image_paths=image_paths,
-        idx_to_label=idx_to_label,
-        top_k=top_k,
-        confidence_threshold=confidence_threshold,
-        model_metadata=model_metadata,
-        eval_metadata=eval_metadata,
-    )
+    if args.save_versioned:
+        save_eval_artifacts(
+            report_dir=run_report_dir,
+            probs=probs,
+            targets=targets,
+            image_ids=image_ids,
+            image_paths=image_paths,
+            idx_to_label=idx_to_label,
+            top_k=top_k,
+            confidence_threshold=confidence_threshold,
+            model_metadata=model_metadata,
+            eval_metadata=eval_metadata,
+            split=split,
+        )
 
     print("[INFO] Evaluation finished.")
-    print(f"[INFO] Latest reports saved to: {report_dir}")
-    print(f"[INFO] Versioned reports saved to: {run_report_dir}")
+    print(f"[INFO] Reports saved to: {report_dir}")
+
+    if args.save_versioned:
+        print(f"[INFO] Versioned reports saved to: {run_report_dir}")
+
     print(json.dumps(metrics, indent=2))
 
 

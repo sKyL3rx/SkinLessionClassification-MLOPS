@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 
+import pytest
 import torch
 import yaml
 
@@ -26,6 +27,8 @@ def test_build_model_resnet50() -> None:
         out = model(x)
     assert out.shape == (1, 7)
 
+
+@pytest.mark.slow
 def test_build_model_from_config() -> None:
     config = copy.deepcopy(load_config())
     config["train"]["pretrained"] = False
@@ -38,11 +41,23 @@ def test_build_model_from_config() -> None:
 
     x = torch.randn(batch_size, 3, image_size, image_size)
 
-    with torch.no_grad():
-        out = model(x)
+    metadata_dim = int(config["train"]["metadata_dim"])
+    metadata = torch.randn(batch_size, metadata_dim)
 
+    with torch.no_grad():
+        try:
+            out = model(x, metadata)
+        except TypeError:
+            out = model(x)
+
+    if isinstance(out, dict):
+        out = out.get("logits", out.get("output"))
+
+    assert out is not None
     assert out.shape == (batch_size, num_classes)
 
+
+@pytest.mark.slow
 def test_build_metadata_fusion_model_from_config() -> None:
     config = copy.deepcopy(load_config())
 
@@ -67,4 +82,30 @@ def test_build_metadata_fusion_model_from_config() -> None:
 
     assert out.shape == (batch_size, num_classes)
 
-    
+
+@pytest.mark.slow
+def test_build_gmu_metadata_fusion_model_from_config() -> None:
+    config = copy.deepcopy(load_config())
+
+    config["train"]["pretrained"] = False
+    config["train"]["use_metadata"] = True
+    config["train"]["metadata_dim"] = 10
+    config["train"]["metadata_hidden_dim"] = 8
+    config["train"]["fusion_hidden_dim"] = 12
+    config["train"]["fusion_type"] = "gmu"
+
+    model = build_model_from_config(config)
+
+    batch_size = 2
+    image_size = int(config["data"]["image_size"])
+    num_classes = int(config["data"]["num_classes"])
+    metadata_dim = int(config["train"]["metadata_dim"])
+
+    images = torch.randn(batch_size, 3, image_size, image_size)
+    metadata = torch.randn(batch_size, metadata_dim)
+
+    with torch.no_grad():
+        out = model(images, metadata)
+
+    assert out.shape == (batch_size, num_classes)
+    assert model.fusion_type == "gmu"

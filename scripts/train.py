@@ -5,6 +5,7 @@ import json
 import math
 import random
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from lesion_ml.data.transforms import build_transforms_from_config
 from lesion_ml.models.factory import build_model_from_config
 from lesion_ml.models.forward import forward_batch
 from lesion_ml.models.losses import FocalLoss
+from lesion_ml.paths import get_project_paths
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,6 +43,74 @@ def load_config(config_path: str) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def load_checkpoint(path: str | Path, device: torch.device) -> dict[str, Any]:
+    checkpoint_path = Path(path)
+
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+    try:
+        return torch.load(
+            checkpoint_path,
+            map_location=device,
+            weights_only=False,
+        )
+    except TypeError:
+        return torch.load(checkpoint_path, map_location=device)
+
+
+def resume_model_weights(
+    model: nn.Module,
+    resume_from: str | Path | None,
+    device: torch.device,
+    strict: bool = True,
+) -> dict[str, Any] | None:
+
+    if not resume_from:
+        return None
+
+    checkpoint = load_checkpoint(resume_from, device=device)
+
+    if "model_state_dict" not in checkpoint:
+        raise KeyError(f"Checkpoint does not contain model_state_dict: {resume_from}")
+
+    missing_keys, unexpected_keys = model.load_state_dict(
+        checkpoint["model_state_dict"],
+        strict=strict,
+    )
+
+    if not strict:
+        print(f"[INFO] Resume missing_keys: {missing_keys}")
+        print(f"[INFO] Resume unexpected_keys: {unexpected_keys}")
+
+    print(
+        f"[INFO] Resumed model weights from: {resume_from} "
+        f"(epoch={checkpoint.get('epoch')}, "
+        f"best_val_macro_f1={checkpoint.get('best_val_macro_f1')}, "
+        f"checkpoint_source={checkpoint.get('checkpoint_source', 'unknown')})"
+    )
+
+    return checkpoint
+
+
+def resume_optimizer_if_requested(
+    optimizer: torch.optim.Optimizer,
+    checkpoint: dict[str, Any] | None,
+    config: dict[str, Any],
+) -> None:
+    if checkpoint is None:
+        return
+
+    if not bool(config["train"].get("resume_optimizer", False)):
+        return
+
+    if "optimizer_state_dict" not in checkpoint:
+        raise KeyError("resume_optimizer=True but checkpoint has no optimizer_state_dict")
+
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    print("[INFO] Resumed optimizer state from checkpoint.")
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -50,6 +120,32 @@ def set_seed(seed: int) -> None:
 
 def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+class ModelEMA:
+    def __init__(self, model: nn.Module, decay: float = 0.9998) -> None:
+
+        if not 0.0 < decay < 1.0:
+            raise ValueError(f"EMA decay must be in (0, 1), got {decay}")
+
+        self.ema = deepcopy(model).eval()
+        self.decay = decay
+
+        for p in self.ema.parameters():
+            p.requires_grad_(False)
+
+    @torch.no_grad()
+    def update(self, model: nn.Module) -> None:
+        ema_state = self.ema.state_dict()
+        model_state = model.state_dict()
+
+        for key, ema_value in ema_state.items():
+            model_value = model_state[key].detach()
+
+            if torch.is_floating_point(ema_value):
+                ema_value.mul_(self.decay).add_(model_value, alpha=1.0 - self.decay)
+            else:
+                ema_value.copy_(model_value)
 
 
 def build_weighted_sampler(
@@ -82,6 +178,19 @@ def build_dataloader(
     use_metadata = bool(config["train"].get("use_metadata", False))
     metadata_schema: MetadataSchema | None = None
 
+    preprocess_cfg = config.get("preprocess", {})
+    preprocess_mode = str(preprocess_cfg.get("mode", "none"))
+    lesion_crop_margin = float(preprocess_cfg.get("lesion_crop_margin", 0.20))
+    dark_border_threshold = int(preprocess_cfg.get("dark_border_threshold", 10))
+
+    print(
+        "[INFO] Preprocess: "
+        f"mode={preprocess_mode}, "
+        f"resize_mode={preprocess_cfg.get('resize_mode', 'resize_pad')}, "
+        f"lesion_crop_margin={lesion_crop_margin}, "
+        f"dark_border_threshold={dark_border_threshold}"
+    )
+
     if use_metadata:
         metadata_schema = build_metadata_schema(train_csv)
         config["train"]["metadata_dim"] = metadata_schema.dim
@@ -94,6 +203,9 @@ def build_dataloader(
         return_metadata=use_metadata,
         metadata_schema=metadata_schema,
         validate_paths=False,
+        preprocess_mode=preprocess_mode,
+        lesion_crop_margin=lesion_crop_margin,
+        dark_border_threshold=dark_border_threshold,
     )
 
     label_to_idx = train_ds.label_to_idx
@@ -105,6 +217,9 @@ def build_dataloader(
         return_metadata=use_metadata,
         metadata_schema=metadata_schema,
         validate_paths=False,
+        preprocess_mode=preprocess_mode,
+        lesion_crop_margin=lesion_crop_margin,
+        dark_border_threshold=dark_border_threshold,
     )
 
     batch_size = int(config["train"]["batch_size"])
@@ -131,7 +246,6 @@ def build_dataloader(
         pin_memory=torch.cuda.is_available(),
         persistent_workers=num_workers > 0,
     )
-
 
     return train_loader, val_loader, label_to_idx
 
@@ -231,33 +345,116 @@ def build_optimizer(model: nn.Module, config: dict[str, Any]) -> torch.optim.Opt
     train_cfg = config["train"]
 
     optimizer_name = str(train_cfg.get("optimizer", "adamw")).lower()
-    lr = float(train_cfg.get("lr", 3e-4))
+    base_lr = float(train_cfg.get("lr", 3e-4))
     weight_decay = float(train_cfg.get("weight_decay", 1e-4))
 
-    decay_params = []
-    no_decay_params = []
+    backbone_lr_mult = float(train_cfg.get("backbone_lr_mult", 1.0))
+    head_lr_mult = float(train_cfg.get("head_lr_mult", 1.0))
+
+    has_metadata_wrapper = hasattr(model, "image_backbone")
+
+    head_prefixes = (
+        "metadata_mlp.",
+        "image_projection.",
+        "metadata_projection.",
+        "gate.",
+        "classifier.",
+        "head.",
+        "fc.",
+    )
+
+    param_groups = {
+        "backbone_decay": {
+            "params": [],
+            "lr": base_lr * backbone_lr_mult,
+            "weight_decay": weight_decay,
+        },
+        "backbone_no_decay": {
+            "params": [],
+            "lr": base_lr * backbone_lr_mult,
+            "weight_decay": 0.0,
+        },
+        "head_decay": {
+            "params": [],
+            "lr": base_lr * head_lr_mult,
+            "weight_decay": weight_decay,
+        },
+        "head_no_decay": {
+            "params": [],
+            "lr": base_lr * head_lr_mult,
+            "weight_decay": 0.0,
+        },
+    }
+
+    def is_no_decay_param(param_name: str, param: torch.nn.Parameter) -> bool:
+        name_l = param_name.lower()
+        return (
+            param.ndim <= 1
+            or name_l.endswith(".bias")
+            or ".norm" in name_l
+            or "norm." in name_l
+            or ".bn" in name_l
+            or "bn." in name_l
+            or "layernorm" in name_l
+            or "batchnorm" in name_l
+        )
+
+    def is_head_param(param_name: str) -> bool:
+        name_l = param_name.lower()
+
+        if has_metadata_wrapper:
+            # MetadataFusionClassifier:
+            # image_backbone.* = pretrained visual backbone
+            # everything else = metadata/fusion/classifier head
+            return not name_l.startswith("image_backbone.")
+
+        return name_l.startswith(head_prefixes)
 
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
 
-        name_l = name.lower()
+        no_decay = is_no_decay_param(name, param)
+        is_head = is_head_param(name)
 
-        if param.ndim <= 1 or name_l.endswith(".bias") or "norm" in name_l or "bn" in name_l:
-            no_decay_params.append(param)
+        if is_head and no_decay:
+            param_groups["head_no_decay"]["params"].append(param)
+        elif is_head:
+            param_groups["head_decay"]["params"].append(param)
+        elif no_decay:
+            param_groups["backbone_no_decay"]["params"].append(param)
         else:
-            decay_params.append(param)
+            param_groups["backbone_decay"]["params"].append(param)
 
-    param_groups = [
-        {"params": decay_params, "weight_decay": weight_decay},
-        {"params": no_decay_params, "weight_decay": 0.0},
-    ]
+    groups = []
+    for group_name, group in param_groups.items():
+        if group["params"]:
+            group["name"] = group_name
+            groups.append(group)
+
+    if not groups:
+        raise ValueError("No trainable parameters found for optimizer.")
 
     if optimizer_name == "adamw":
-        return torch.optim.AdamW(param_groups, lr=lr)
+        return torch.optim.AdamW(
+            groups,
+            betas=tuple(train_cfg.get("betas", (0.9, 0.999))),
+            eps=float(train_cfg.get("eps", 1e-8)),
+        )
 
     if optimizer_name == "adam":
-        return torch.optim.Adam(param_groups, lr=lr)
+        return torch.optim.Adam(
+            groups,
+            betas=tuple(train_cfg.get("betas", (0.9, 0.999))),
+            eps=float(train_cfg.get("eps", 1e-8)),
+        )
+
+    if optimizer_name == "sgd":
+        return torch.optim.SGD(
+            groups,
+            momentum=float(train_cfg.get("momentum", 0.9)),
+            nesterov=bool(train_cfg.get("nesterov", True)),
+        )
 
     raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
@@ -308,6 +505,7 @@ def train_one_epoch(
     scheduler: LambdaLR | None,
     scaler: torch.amp.GradScaler,
     config: dict[str, Any],
+    ema_model: ModelEMA | None = None,
 ) -> tuple[float, float, float, float, float]:
     model.train()
 
@@ -321,7 +519,11 @@ def train_one_epoch(
 
     start_time = time.time()
 
-    for batch in loader:
+    max_batches = config["train"].get("max_train_batches")
+    max_batches = int(max_batches) if max_batches not in (None, "", 0, "0") else None
+    samples_seen = 0
+
+    for batch_idx, batch in enumerate(loader, start=1):
         images = batch["image"].to(device, non_blocking=True)
         targets = batch["label"].to(device, non_blocking=True)
 
@@ -347,8 +549,13 @@ def train_one_epoch(
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
 
+            old_scale = scaler.get_scale()
             scaler.step(optimizer)
             scaler.update()
+            new_scale = scaler.get_scale()
+
+            optimizer_stepped = new_scale >= old_scale
+
         else:
             loss.backward()
 
@@ -356,21 +563,31 @@ def train_one_epoch(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
 
             optimizer.step()
+            optimizer_stepped = True
 
-        if scheduler is not None:
-            scheduler.step()
+        if optimizer_stepped:
+            if ema_model is not None:
+                ema_model.update(model)
 
-        running_loss += loss.item() * images.size(0)
+            if scheduler is not None:
+                scheduler.step()
+
+        batch_size = images.size(0)
+        samples_seen += batch_size
+        running_loss += loss.item() * batch_size
 
         preds = torch.argmax(logits, dim=1)
         all_targets.extend(targets.detach().cpu().tolist())
         all_preds.extend(preds.detach().cpu().tolist())
 
-    epoch_loss = running_loss / len(loader.dataset)
+        if max_batches is not None and batch_idx >= max_batches:
+            break
+
+    epoch_loss = running_loss / max(samples_seen, 1)
     epoch_acc = accuracy_score(all_targets, all_preds)
-    epoch_f1 = f1_score(all_targets, all_preds, average="macro")
+    epoch_f1 = f1_score(all_targets, all_preds, average="macro", zero_division=0)
     epoch_time = time.time() - start_time
-    current_lr = optimizer.param_groups[0]["lr"]
+    current_lr = max(group["lr"] for group in optimizer.param_groups)
 
     return epoch_loss, epoch_acc, epoch_f1, epoch_time, current_lr
 
@@ -381,6 +598,7 @@ def evaluate(
     loader: DataLoader,
     loss_fn: nn.Module,
     device: torch.device,
+    max_batches: int | None = None,
 ) -> tuple[float, float, float, float]:
     model.eval()
 
@@ -389,8 +607,9 @@ def evaluate(
     all_preds: list[int] = []
 
     start_time = time.time()
+    samples_seen = 0
 
-    for batch in loader:
+    for batch_idx, batch in enumerate(loader, start=1):
         images = batch["image"].to(device, non_blocking=True)
         targets = batch["label"].to(device, non_blocking=True)
 
@@ -404,15 +623,20 @@ def evaluate(
         )
         loss = loss_fn(logits, targets)
 
-        running_loss += loss.item() * images.size(0)
+        batch_size = images.size(0)
+        samples_seen += batch_size
+        running_loss += loss.item() * batch_size
 
         preds = torch.argmax(logits, dim=1)
         all_targets.extend(targets.detach().cpu().tolist())
         all_preds.extend(preds.detach().cpu().tolist())
 
-    epoch_loss = running_loss / len(loader.dataset)
+        if max_batches is not None and batch_idx >= max_batches:
+            break
+
+    epoch_loss = running_loss / max(samples_seen, 1)
     epoch_acc = accuracy_score(all_targets, all_preds)
-    epoch_f1 = f1_score(all_targets, all_preds, average="macro")
+    epoch_f1 = f1_score(all_targets, all_preds, average="macro", zero_division=0)
     epoch_time = time.time() - start_time
 
     return epoch_loss, epoch_acc, epoch_f1, epoch_time
@@ -426,6 +650,7 @@ def save_checkpoint(
     best_metric: float,
     config: dict[str, Any],
     label_to_idx: dict[str, int],
+    checkpoint_source: str = "raw",
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -434,6 +659,8 @@ def save_checkpoint(
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "best_val_macro_f1": best_metric,
+        "checkpoint_source": checkpoint_source,
+        "model_ema": checkpoint_source == "ema",
         "config": config,
         "label_to_idx": label_to_idx,
     }
@@ -454,13 +681,18 @@ def train(
     report_dir: Path,
     config: dict[str, Any],
     label_to_idx: dict[str, int],
+    ema_model: ModelEMA | None = None,
 ) -> dict[str, Any]:
     best_val_f1 = -1.0
     history: list[dict[str, Any]] = []
 
+    best_checkpoint_source = "none"
+
     early_stopping = bool(config["train"].get("early_stopping", False))
     early_stopping_patience = int(config["train"].get("early_stopping_patience", 5))
     early_stopping_min_delta = float(config["train"].get("early_stopping_min_delta", 0.0))
+    max_val_batches = config["train"].get("max_val_batches")
+    max_val_batches = int(max_val_batches) if max_val_batches not in (None, "", 0, "0") else None
 
     epochs_without_improvement = 0
     stopped_early = False
@@ -479,6 +711,7 @@ def train(
             scheduler=scheduler,
             scaler=scaler,
             config=config,
+            ema_model=ema_model,
         )
 
         val_loss, val_acc, val_f1, val_time = evaluate(
@@ -486,24 +719,56 @@ def train(
             loader=val_loader,
             loss_fn=loss_fn,
             device=device,
+            max_batches=max_val_batches,
         )
 
-        improved = val_f1 > best_val_f1 + early_stopping_min_delta
+        ema_val_loss = None
+        ema_val_acc = None
+        ema_val_f1 = None
+        ema_val_time = None
+
+        # Default: use raw model for checkpoint selection.
+        selection_f1 = val_f1
+        selection_model = model
+        selection_source = "raw"
+
+        if ema_model is not None:
+            ema_val_loss, ema_val_acc, ema_val_f1, ema_val_time = evaluate(
+                model=ema_model.ema,
+                loader=val_loader,
+                loss_fn=loss_fn,
+                device=device,
+                max_batches=max_val_batches,
+            )
+
+            if ema_val_f1 > val_f1:
+                selection_f1 = ema_val_f1
+                selection_model = ema_model.ema
+                selection_source = "ema"
+
+        improved = selection_f1 > best_val_f1 + early_stopping_min_delta
 
         if improved:
-            best_val_f1 = val_f1
+            best_val_f1 = selection_f1
             epochs_without_improvement = 0
+
+            best_checkpoint_source = selection_source
 
             save_checkpoint(
                 path=ckpt_path,
-                model=model,
+                model=selection_model,
                 optimizer=optimizer,
                 epoch=epoch,
                 best_metric=best_val_f1,
                 config=config,
                 label_to_idx=label_to_idx,
+                checkpoint_source=selection_source,
             )
-            print(f"[INFO] Saved new best checkpoint to {ckpt_path}")
+            print(
+                f"[INFO] Saved new best checkpoint to {ckpt_path} "
+                f"using {selection_source} model "
+                f"(selection_val_macro_f1={selection_f1:.4f})"
+            )
         else:
             epochs_without_improvement += 1
             print(
@@ -522,11 +787,22 @@ def train(
             "val_acc": val_acc,
             "val_macro_f1": val_f1,
             "val_time_sec": val_time,
+            "ema_val_loss": ema_val_loss,
+            "ema_val_acc": ema_val_acc,
+            "ema_val_macro_f1": ema_val_f1,
+            "ema_val_time_sec": ema_val_time,
+            "selection_val_macro_f1": selection_f1,
+            "selection_source": selection_source,
             "best_val_macro_f1_so_far": best_val_f1,
             "improved": improved,
             "epochs_without_improvement": epochs_without_improvement,
         }
         history.append(row)
+
+        if ema_model is not None:
+            ema_msg = f" | ema_val_f1={ema_val_f1:.4f}"
+        else:
+            ema_msg = ""
 
         print(
             f"[Epoch {epoch}/{epochs}] "
@@ -536,7 +812,9 @@ def train(
             f"train_f1={train_f1:.4f} | "
             f"val_loss={val_loss:.4f} "
             f"val_acc={val_acc:.4f} "
-            f"val_f1={val_f1:.4f} | "
+            f"val_f1={val_f1:.4f}"
+            f"{ema_msg} | "
+            f"selection={selection_source} "
             f"best_val_f1={best_val_f1:.4f}"
         )
 
@@ -566,7 +844,8 @@ def train(
         "scheduler": str(config["train"].get("scheduler", "none")),
         "warmup_epochs": int(config["train"].get("warmup_epochs", 0)),
         "min_lr": float(config["train"].get("min_lr", 0.0)),
-        "selection_metric": "val_macro_f1",
+        "model_ema": ema_model is not None,
+        "model_ema_decay": float(config["train"].get("model_ema_decay", 0.0)),
         "test_used_for_model_selection": False,
         "loss": str(config["train"].get("loss", "cross_entropy")),
         "class_weights": bool(config["train"].get("class_weights", False)),
@@ -581,6 +860,14 @@ def train(
         "metadata_hidden_dim": int(config["train"].get("metadata_hidden_dim", 64)),
         "fusion_hidden_dim": int(config["train"].get("fusion_hidden_dim", 256)),
         "history_csv": str(history_csv_path),
+        "resume_from": config["train"].get("resume_from"),
+        "resume_optimizer": bool(config["train"].get("resume_optimizer", False)),
+        "resume_strict": bool(config["train"].get("resume_strict", True)),
+        "selection_metric": "max(raw_val_macro_f1, ema_val_macro_f1)"
+        if ema_model is not None
+        else "val_macro_f1",
+        "checkpoint_source": best_checkpoint_source,
+        "fusion_type": str(config["train"].get("fusion_type", "concat")),
     }
 
     summary_json_path = report_dir / "train_metrics.json"
@@ -607,22 +894,63 @@ def main() -> None:
     if bool(config["train"].get("channels_last", False)) and device.type == "cuda":
         model = model.to(memory_format=torch.channels_last)
 
+    resume_from = config["train"].get("resume_from")
+    resume_strict = bool(config["train"].get("resume_strict", True))
+
+    resume_checkpoint = resume_model_weights(
+        model=model,
+        resume_from=resume_from,
+        device=device,
+        strict=resume_strict,
+    )
+
+    ema_model = None
+    if bool(config["train"].get("model_ema", False)):
+        ema_model = ModelEMA(
+            model=model,
+            decay=float(config["train"].get("model_ema_decay", 0.9998)),
+        )
+        print(
+            "[INFO] Model EMA enabled. "
+            f"decay={float(config['train'].get('model_ema_decay', 0.9998))}"
+        )
+
     loss_fn = build_loss_fn(config, label_to_idx).to(device)
     optimizer = build_optimizer(model, config)
+
+    resume_optimizer_if_requested(
+        optimizer=optimizer,
+        checkpoint=resume_checkpoint,
+        config=config,
+    )
+
+    max_train_batches = config["train"].get("max_train_batches")
+    max_train_batches = (
+        int(max_train_batches) if max_train_batches not in (None, "", 0, "0") else None
+    )
+    steps_per_epoch = len(train_loader)
+    if max_train_batches is not None:
+        steps_per_epoch = min(steps_per_epoch, max_train_batches)
 
     scheduler = build_scheduler(
         optimizer=optimizer,
         config=config,
-        steps_per_epoch=len(train_loader),
+        steps_per_epoch=steps_per_epoch,
     )
 
     use_amp = bool(config["train"].get("mixed_precision", False)) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     epochs = int(config["train"]["epochs"])
-    artifact_dir = Path(config["project"].get("artifact_dir", "artifacts"))
-    ckpt_path = artifact_dir / "models" / "best.ckpt"
-    report_dir = artifact_dir / "reports"
+
+    paths = get_project_paths(config)
+    run_dir = paths.run_dir
+    ckpt_path = paths.checkpoint_path
+    report_dir = paths.reports_dir
+
+    print(f"[INFO] Run directory: {run_dir}")
+    print(f"[INFO] Checkpoint path: {ckpt_path}")
+    print(f"[INFO] Report directory: {report_dir}")
 
     summary = train(
         model=model,
@@ -638,6 +966,7 @@ def main() -> None:
         report_dir=report_dir,
         config=config,
         label_to_idx=label_to_idx,
+        ema_model=ema_model,
     )
 
     print("[INFO] Training finished.")
