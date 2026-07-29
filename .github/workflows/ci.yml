@@ -6,41 +6,73 @@ on:
       - main
       - "feat/**"
       - "dev/**"
+
   pull_request:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fast-tests:
+    name: Fast tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libglib2.0-0 libgl1
 
-      - name: Install package
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b 
+        with:
+          version: "0.12.0"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Validate lockfile
+        run: uv lock --check
+
+      - name: Sync locked CPU environment
+        run: >
+          uv sync
+          --locked
+          --no-default-groups
+          --group dev
+          --extra train
+          --extra api
+          --extra onnx-cpu
+
+      - name: Compile Python sources
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-      
-      - name: Compile Python files
+          uv run --locked --no-sync python \
+            -m compileall \
+            src \
+            scripts \
+            tests
+
+      - name: Run lint checks
         run: |
-          python -m compileall src scripts deployment tests
-      
+          uv run --locked --no-sync ruff check .
+          uv run --locked --no-sync ruff format --check .
+
       - name: Run fast tests
         run: |
-          python -m pytest tests -m "not artifact and not data and not slow" -q
-      
-      - name: Lint
-        run: |
-          python -m ruff check .
+          uv run --locked --no-sync pytest \
+            tests \
+            -m "not artifact and not data and not slow" \
+            -q
+
+      - name: Minimize uv cache
+        if: always()
+        run: uv cache prune --ci
