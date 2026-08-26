@@ -1,0 +1,84 @@
+{
+  "onnx_path": "deployment/onnx/model.onnx",
+  "available_providers": [
+    "AzureExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "session_providers": [
+    "CPUExecutionProvider"
+  ],
+  "results": [
+    {
+      "backend": "onnxruntime",
+      "providers": "CPUExecutionProvider",
+      "onnx_path": "deployment/onnx/model.onnx",
+      "model_size_mb": 106.9170446395874,
+      "image_size": 224,
+      "batch_size": 1,
+      "runs": 100,
+      "warmup_runs": 20,
+      "mean_latency_ms": 32.106642309663584,
+      "std_latency_ms": 3.51921017009925,
+      "min_latency_ms": 27.834708002046682,
+      "p50_latency_ms": 31.549278002785286,
+      "p95_latency_ms": 39.002832597179804,
+      "p99_latency_ms": 42.27389531552037,
+      "max_latency_ms": 47.0452320005279,
+      "throughput_images_per_sec": 31.146203030362226
+    },
+    {
+      "backend": "onnxruntime",
+      "providers": "CPUExecutionProvider",
+      "onnx_path": "deployment/onnx/model.onnx",
+      "model_size_mb": 106.9170446395874,
+      "image_size": 224,
+      "batch_size": 8,
+      "runs": 100,
+      "warmup_runs": 20,
+      "mean_latency_ms": 382.2967937001522,
+      "std_latency_ms": 11.037234023483515,
+      "min_latency_ms": 366.9482440018328,
+      "p50_latency_ms": 380.90793049923377,
+      "p95_latency_ms": 402.6631864009687,
+      "p99_latency_ms": 419.06482278922346,
+      "max_latency_ms": 429.16250500275055,
+      "throughput_images_per_sec": 20.926149870549686
+    },
+    {
+      "backend": "onnxruntime",
+      "providers": "CPUExecutionProvider",
+      "onnx_path": "deployment/onnx/model.onnx",
+      "model_size_mb": 106.9170446395874,
+      "image_size": 224,
+      "batch_size": 16,
+      "runs": 100,
+      "warmup_runs": 20,
+      "mean_latency_ms": 878.6519581194443,
+      "std_latency_ms": 15.164697508647428,
+      "min_latency_ms": 854.2104059961275,
+      "p50_latency_ms": 875.1101204979932,
+      "p95_latency_ms": 907.4222726976586,
+      "p99_latency_ms": 917.863356584494,
+      "max_latency_ms": 934.8181550012669,
+      "throughput_images_per_sec": 18.209713017933037
+    },
+    {
+      "backend": "onnxruntime",
+      "providers": "CPUExecutionProvider",
+      "onnx_path": "deployment/onnx/model.onnx",
+      "model_size_mb": 106.9170446395874,
+      "image_size": 224,
+      "batch_size": 32,
+      "runs": 100,
+      "warmup_runs": 20,
+      "mean_latency_ms": 2029.2534843600151,
+      "std_latency_ms": 180.3654417810786,
+      "min_latency_ms": 1849.0381719966535,
+      "p50_latency_ms": 1951.201587999094,
+      "p95_latency_ms": 2458.4647704945382,
+      "p99_latency_ms": 2524.753440172136,
+      "max_latency_ms": 2663.40800600301,
+      "throughput_images_per_sec": 15.769345843992548
+    }
+  ]
+}

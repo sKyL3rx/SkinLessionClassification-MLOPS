@@ -1,0 +1,122 @@
+project:
+  name: phase2_validation_selected_ensemble_broad
+  seed: 42
+
+data:
+  labels:
+    - akiec
+    - bcc
+    - bkl
+    - df
+    - mel
+    - nv
+    - vasc
+
+selection:
+  primary_metric: macro_f1
+  tie_breakers:
+    - balanced_accuracy
+    - mel_recall
+    - akiec_recall
+  select_on_split: val
+  evaluate_on_split: test
+
+output:
+  output_dir: artifacts/reports/ensemble_broad
+  sweep_csv: ensemble_weight_sweep.csv
+  test_diagnostic_sweep_csv: ensemble_weight_sweep_test_diagnostic.csv
+  best_val_metrics_json: ensemble_best_val_metrics.json
+  test_metrics_json: ensemble_test_metrics.json
+  val_predictions_csv: ensemble_val_predictions.csv
+  test_predictions_csv: ensemble_test_predictions.csv
+
+models:
+  - name: convnextv2_gmu
+    run_name: convnextv2_tiny_384_gmu_metadata_resizepad_strict
+    val_predictions: artifacts/runs/convnextv2_tiny_384_gmu_metadata_resizepad_strict/reports/val_predictions.csv
+    test_predictions: artifacts/runs/convnextv2_tiny_384_gmu_metadata_resizepad_strict/reports/test_predictions.csv
+
+  - name: convnextv2_image_only
+    run_name: convnextv2_tiny_384_image_only_resizepad
+    val_predictions: artifacts/runs/convnextv2_tiny_384_image_only_resizepad/reports/val_predictions.csv
+    test_predictions: artifacts/runs/convnextv2_tiny_384_image_only_resizepad/reports/test_predictions.csv
+
+  - name: convnextv2_concat
+    run_name: convnextv2_tiny_384_concat_metadata_resizepad
+    val_predictions: artifacts/runs/convnextv2_tiny_384_concat_metadata_resizepad/reports/val_predictions.csv
+    test_predictions: artifacts/runs/convnextv2_tiny_384_concat_metadata_resizepad/reports/test_predictions.csv
+
+  - name: efficientnetv2_stage2
+    run_name: efficientnetv2_s_stage2_384_gmu_metadata_resizepad
+    val_predictions: artifacts/runs/efficientnetv2_s_stage2_384_gmu_metadata_resizepad/reports/val_predictions.csv
+    test_predictions: artifacts/runs/efficientnetv2_s_stage2_384_gmu_metadata_resizepad/reports/test_predictions.csv
+
+  - name: dinov2_frozen
+    run_name: dinov2_small_frozen_518_gmu_metadata_resizepad
+    val_predictions: artifacts/runs/dinov2_small_frozen_518_gmu_metadata_resizepad/reports/val_predictions.csv
+    test_predictions: artifacts/runs/dinov2_small_frozen_518_gmu_metadata_resizepad/reports/test_predictions.csv
+
+weight_sets:
+  - name: single_convnextv2_gmu
+    weights:
+      convnextv2_gmu: 1.0
+
+  - name: single_convnextv2_image_only
+    weights:
+      convnextv2_image_only: 1.0
+
+  - name: single_convnextv2_concat
+    weights:
+      convnextv2_concat: 1.0
+
+  - name: single_efficientnetv2_stage2
+    weights:
+      efficientnetv2_stage2: 1.0
+
+  - name: single_dinov2_frozen
+    weights:
+      dinov2_frozen: 1.0
+
+  - name: gmu_0.6_eff_0.4
+    weights:
+      convnextv2_gmu: 0.6
+      efficientnetv2_stage2: 0.4
+
+  - name: gmu_0.6_img_0.4
+    weights:
+      convnextv2_gmu: 0.6
+      convnextv2_image_only: 0.4
+
+
+auto_weight_search:
+  enabled: true
+  step: 0.05
+  min_nonzero_weight: 0.05
+  max_models_per_ensemble: 3
+
+  max_weight_by_model:
+    convnextv2_gmu: 1.00
+    convnextv2_image_only: 0.60
+    convnextv2_concat: 0.50
+    efficientnetv2_stage2: 0.45
+    dinov2_frozen: 0.15
+
+  min_weight_by_model_when_present:
+    convnextv2_gmu: 0.30
+
+  subsets:
+    # 2-model ensembles
+    - [convnextv2_gmu, convnextv2_image_only]
+    - [convnextv2_gmu, convnextv2_concat]
+    - [convnextv2_gmu, efficientnetv2_stage2]
+    - [convnextv2_gmu, dinov2_frozen]
+    - [convnextv2_image_only, convnextv2_concat]
+    - [convnextv2_image_only, efficientnetv2_stage2]
+
+    # 3-model ensembles anchored around ConvNeXtV2-GMU
+    - [convnextv2_gmu, convnextv2_image_only, efficientnetv2_stage2]
+    - [convnextv2_gmu, convnextv2_image_only, convnextv2_concat]
+    - [convnextv2_gmu, convnextv2_concat, efficientnetv2_stage2]
+    - [convnextv2_gmu, convnextv2_image_only, dinov2_frozen]
+    - [convnextv2_gmu, efficientnetv2_stage2, dinov2_frozen]
+    - [convnextv2_gmu, convnextv2_concat, dinov2_frozen]

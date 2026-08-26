@@ -1,0 +1,118 @@
+project:
+  seed: 42
+  experiment_name: convnextv2_tiny_384_image_only_resizepad
+  artifact_dir: artifacts
+
+data:
+  raw_dir: data/raw/ham10000
+  external_dir: data/external
+  interim_dir: data/interim
+  processed_dir: data/processed
+  splits_dir: data/splits
+
+  metadata_csv: data/processed/metadata.csv
+  train_csv: data/splits/train.csv
+  val_csv: data/splits/val.csv
+  test_csv: data/splits/test.csv
+
+  image_size: 384
+  num_classes: 7
+  labels:
+    - akiec
+    - bcc
+    - bkl
+    - df
+    - mel
+    - nv
+    - vasc
+
+  val_size: 0.10
+  test_size: 0.10
+  group_by: split_group
+
+train:
+  backbone: convnextv2_tiny
+  pretrained: true
+  freeze_backbone: false
+
+  use_metadata: false
+  metadata_dim: 19
+  metadata_hidden_dim: 96
+  fusion_hidden_dim: 384
+  fusion_type: concat
+  dropout: 0.25
+  drop_path_rate: 0.10
+
+  batch_size: 64
+  num_workers: 8
+  epochs: 200
+
+  optimizer: adamw
+  lr: 0.00008
+  backbone_lr_mult: 0.25
+  head_lr_mult: 1.0
+  min_lr: 0.000001
+  weight_decay: 0.00005
+  scheduler: cosine_warmup
+  warmup_epochs: 5
+
+  loss: cb_focal
+  cb_beta: 0.999
+  focal_gamma: 1.5
+  class_weights: false
+  weighted_sampler: false
+  label_smoothing: 0.03
+
+  mixed_precision: true
+  channels_last: true
+  grad_clip_norm: 1.0
+
+  early_stopping: true
+  early_stopping_patience: 14
+  early_stopping_min_delta: 0.0005
+
+  model_ema: true
+  model_ema_decay: 0.9998
+
+  mixup_alpha: 0.0
+  mixup_prob: 0.0
+
+preprocess:
+  mode: none
+  resize_mode: resize_pad
+  lesion_crop_margin: 0.20
+  dark_border_threshold: 10
+
+augment:
+  use_random_resized_crop: false
+  crop_scale: [0.75, 1.0]
+  crop_ratio: [0.9, 1.1]
+
+  horizontal_flip_p: 0.5
+  vertical_flip_p: 0.5
+
+  shift_limit: 0.04
+  scale_limit: 0.08
+  rotate_limit: 30
+  geometric_p: 0.5
+
+  brightness: 0.15
+  contrast: 0.15
+  saturation: 0.12
+  hue: 0.03
+  color_jitter_p: 0.25
+
+  normalize: true
+
+inference:
+  device: auto
+
+evaluate:
+  primary_metric: macro_f1
+  top_k: 3
+  confidence_threshold: 0.95
+  use_tta: true
+  tta_transforms:
+    - original
+    - hflip
+    - vflip

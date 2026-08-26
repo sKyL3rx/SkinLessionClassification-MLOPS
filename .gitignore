@@ -2,22 +2,21 @@
 __pycache__/
 *.py[cod]
 *.so
-
-# Virtual environment
-venv/
-.venv/
-env/
-
-# Environment
-.env
-.env.local
-
-# Test / lint caches
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .coverage
+coverage.xml
 htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment / secrets
+.env
+.env.local
 
 # Packaging
 build/
@@ -40,17 +39,23 @@ data/interim/*
 !data/raw/*.dvc
 
 # Large model artifacts
-artifacts/models/
-deployment/onnx/*.onnx
-deployment/onnx/*.onnx.data
+artifacts/runs/*/checkpoints/
+artifacts/runs/*/onnx/
 
-# Optional large reports
-artifacts/reports/predictions.csv
+# Large / generated report dumps
 artifacts/reports/runs/
+artifacts/reports/eval_variants/
+artifacts/reports/error_analysis_no_tta_full_probs/
+artifacts/reports/error_analysis_tta_hflip_vflip/
+artifacts/reports/threshold_calibration_*/
+artifacts/reports/**/ensemble_*_predictions.csv
+artifacts/reports/**/calibrated_*_predictions.csv
+artifacts/reports/**/predictions.csv
 
-# MLflow local runs
+# MLflow / W&B
 mlruns/
 mlartifacts/
+wandb/
 
 # DVC local cache
 .dvc/cache/
@@ -58,5 +63,8 @@ mlartifacts/
 .dvc/config.local
 dvc_plots/
 
-# docs
-docs/
+# Local archives
+*.zip
+_local_archive/
+
+artifacts/deployment/

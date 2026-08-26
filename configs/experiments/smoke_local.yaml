@@ -1,0 +1,133 @@
+project:
+  seed: 42
+  experiment_name: convnextv2_tiny_384_gmu_metadata_resizepad_strict_smoke
+  artifact_dir: artifacts
+data:
+  raw_dir: data/raw/ham10000
+  external_dir: data/external
+  interim_dir: data/interim
+  processed_dir: data/processed
+  splits_dir: data/splits
+  metadata_csv: data/processed/metadata.csv
+  train_csv: data/splits/train.csv
+  val_csv: data/splits/val.csv
+  test_csv: data/splits/test.csv
+  image_size: 384
+  num_classes: 7
+  labels:
+  - akiec
+  - bcc
+  - bkl
+  - df
+  - mel
+  - nv
+  - vasc
+  val_size: 0.1
+  test_size: 0.1
+  group_by: split_group
+train:
+  backbone: convnextv2_tiny
+  pretrained: true
+  freeze_backbone: false
+  use_metadata: true
+  metadata_dim: 19
+  metadata_hidden_dim: 96
+  fusion_hidden_dim: 384
+  fusion_type: gmu
+  dropout: 0.25
+  drop_path_rate: 0.1
+  batch_size: 2
+  num_workers: 0
+  epochs: 1
+  optimizer: adamw
+  lr: 8.0e-05
+  backbone_lr_mult: 0.25
+  head_lr_mult: 1.0
+  min_lr: 1.0e-06
+  weight_decay: 5.0e-05
+  scheduler: cosine_warmup
+  warmup_epochs: 5
+  loss: cb_focal
+  cb_beta: 0.999
+  focal_gamma: 1.5
+  class_weights: false
+  weighted_sampler: false
+  label_smoothing: 0.03
+  mixed_precision: true
+  channels_last: true
+  grad_clip_norm: 1.0
+  early_stopping: false
+  early_stopping_patience: 14
+  early_stopping_min_delta: 0.0005
+  model_ema: false
+  model_ema_decay: 0.9998
+  mixup_alpha: 0.0
+  mixup_prob: 0.0
+  max_train_batches: 2
+  max_val_batches: 2
+preprocess:
+  mode: none
+  resize_mode: resize_pad
+  lesion_crop_margin: 0.2
+  dark_border_threshold: 10
+augment:
+  use_random_resized_crop: false
+  crop_scale:
+  - 0.75
+  - 1.0
+  crop_ratio:
+  - 0.9
+  - 1.1
+  horizontal_flip_p: 0.5
+  vertical_flip_p: 0.5
+  shift_limit: 0.04
+  scale_limit: 0.08
+  rotate_limit: 30
+  geometric_p: 0.5
+  brightness: 0.15
+  contrast: 0.15
+  saturation: 0.12
+  hue: 0.03
+  color_jitter_p: 0.25
+  normalize: true
+inference:
+  device: auto
+  onnx_provider: cpu
+evaluate:
+  primary_metric: macro_f1
+  top_k: 3
+  confidence_threshold: 0.85
+  use_tta: true
+  tta_transforms:
+  - original
+  - hflip
+  - vflip
+calibration:
+  method: temperature_scaling
+  optimize_metric: nll
+  min_temperature: 0.05
+  max_temperature: 10.0
+  max_iter: 500
+  eps: 1.0e-12
+selective_prediction:
+  thresholds:
+  - 0.0
+  - 0.5
+  - 0.6
+  - 0.65
+  - 0.7
+  - 0.75
+  - 0.8
+  - 0.85
+  - 0.9
+  - 0.95
+  selection:
+    minimum_coverage: 0.8
+    maximize: accepted_macro_f1
+error_analysis:
+  critical_classes:
+  - mel
+  - akiec
+deployment:
+  bundle_dir: artifacts/deployment/model
+  max_upload_mb: 10

@@ -1,0 +1,91 @@
+name: skin-lesion-dvc-train
+
+workdir: .
+
+resources:
+  cloud: vast
+  accelerators: RTX3090:1
+  disk_size: 150
+  image_id: docker:baoduy3/skin-lesion-train:v1
+
+envs:
+  R2_ACCOUNT_ID: null
+  PYTHONUNBUFFERED: "1"
+  DVC_NO_ANALYTICS: "1"
+
+secrets:
+  AWS_ACCESS_KEY_ID: null
+  AWS_SECRET_ACCESS_KEY: null
+
+setup: |
+  set -euo pipefail
+
+  echo "[INFO] uv version"
+  uv --version
+
+  echo "[INFO] Sync project dependencies"
+  uv sync \
+    --locked \
+    --extra train \
+    --extra mlops
+
+  echo "[INFO] Dependency check"
+  uv run --locked python -m pip check
+
+  echo "[INFO] Configure DVC no-scm for SkyPilot"
+  uv run --locked dvc config \
+    --local \
+    core.no_scm true
+
+  echo "[INFO] CUDA check"
+  uv run --locked python - <<'PY'
+  import torch
+  import dvc_s3
+
+  print("torch:", torch.__version__)
+  print("cuda build:", torch.version.cuda)
+  print("cuda available:", torch.cuda.is_available())
+
+  if torch.cuda.is_available():
+      print("gpu:", torch.cuda.get_device_name(0))
+
+  print("dvc_s3 ok")
+  PY
+
+  echo "[INFO] DVC remote check"
+  uv run --locked dvc remote list
+
+run: |
+  set -euo pipefail
+
+  echo "[INFO] Check raw-data DVC pointer"
+  pwd
+  ls -lah data/raw || true
+  test -f data/raw/ham10000.dvc
+
+  echo "[INFO] Pull raw data"
+  uv run --locked dvc pull \
+    data/raw/ham10000.dvc \
+    -v
+
+  echo "[INFO] Run full DVC pipeline"
+  uv run --locked dvc repro -v
+
+  echo "[INFO] Verify deployment bundle"
+  test -f \
+    artifacts/deployment/model/model.onnx
+
+  test -f \
+    artifacts/deployment/model/model.metadata.json
+
+  test -f \
+    artifacts/deployment/model/temperature.json
+
+  test -f \
+    artifacts/deployment/model/decision.json
+
+  echo "[INFO] Deployment bundle verified"
+  ls -lah artifacts/deployment/model
+
+  echo "[INFO] Push DVC outputs"
+  uv run --locked dvc push -v

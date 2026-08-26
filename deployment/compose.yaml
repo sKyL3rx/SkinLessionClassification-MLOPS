@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deployment/docker/api.Dockerfile
+
+    image: skin-lesion-api:gpu
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      MODEL_BUNDLE_DIR: /app/model
+      ONNX_PROVIDER: cuda
+      MAX_UPLOAD_MB: "10"
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
+
+    restart: unless-stopped

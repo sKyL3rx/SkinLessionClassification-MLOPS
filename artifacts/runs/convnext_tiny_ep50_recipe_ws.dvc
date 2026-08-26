@@ -1,0 +1,6 @@
+outs:
+- md5: ca559e408304b3c61bd7157db8579dd4.dir
+  size: 446340937
+  nfiles: 10
+  hash: md5
+  path: convnext_tiny_ep50_recipe_ws
