@@ -1,6 +1,6 @@
 project:
   seed: 42
-  experiment_name: convnextv2_tiny_384_gmu_metadata_resizepad_strict
+  experiment_name: convnextv2_tiny_384_image_only_resizepad
   artifact_dir: artifacts
 
 data:
@@ -35,17 +35,17 @@ train:
   pretrained: true
   freeze_backbone: false
 
-  use_metadata: true
+  use_metadata: false
   metadata_dim: 19
   metadata_hidden_dim: 96
   fusion_hidden_dim: 384
-  fusion_type: gmu
+  fusion_type: concat
   dropout: 0.25
   drop_path_rate: 0.10
 
-  batch_size: 32
+  batch_size: 64
   num_workers: 8
-  epochs: 100
+  epochs: 200
 
   optimizer: adamw
   lr: 0.00008

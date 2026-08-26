@@ -1,77 +1,332 @@
+vars:
+  - params.yaml
+
 stages:
   prepare_data:
-    cmd: python scripts/prepare_ham10000.py --config params.yaml
+    cmd: >-
+      uv run --locked python
+      scripts/prepare_ham10000.py
+      --config params.yaml
     deps:
       - scripts/prepare_ham10000.py
+      - src/lesion_ml/data
+      - data/raw/ham10000
     params:
       - data.raw_dir
       - data.metadata_csv
       - data.labels
     outs:
-      - data/processed/metadata.csv
-  
+      - ${data.metadata_csv}
+
   make_splits:
-    cmd: python scripts/make_grouped_splits.py --config params.yaml
+    cmd: >-
+      uv run --locked python
+      scripts/make_grouped_splits.py
+      --config params.yaml
     deps:
       - scripts/make_grouped_splits.py
-      - data/processed/metadata.csv
+      - ${data.metadata_csv}
     params:
       - project.seed
-      - data.metadata_csv
-      - data.splits_dir
       - data.val_size
       - data.test_size
       - data.group_by
+      - data.splits_dir
     outs:
-      - data/splits/train.csv
-      - data/splits/val.csv
-      - data/splits/test.csv
+      - ${data.train_csv}
+      - ${data.val_csv}
+      - ${data.test_csv}
+
   train:
-    cmd: python scripts/train.py --config params.yaml
+    cmd: >-
+      uv run --locked python
+      scripts/train.py
+      --config params.yaml
     deps:
       - scripts/train.py
-      - src/lesion_ml
-      - data/splits/train.csv
-      - data/splits/val.csv
+      - src/lesion_ml/data
+      - src/lesion_ml/models
+      - src/lesion_ml/paths.py
+      - ${data.train_csv}
+      - ${data.val_csv}
+      - data/raw/ham10000/images
     params:
-      - project.seed
+      - project
       - data.image_size
       - data.num_classes
+      - data.labels
       - train
+      - preprocess
       - augment
     outs:
-      - artifacts/models/best.ckpt
+      - ${project.artifact_dir}/runs/${project.experiment_name}/checkpoints/best.ckpt
     metrics:
-      - artifacts/reports/train_metrics.json
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/train_metrics.json:
+          cache: false
     plots:
-      - artifacts/reports/train_history.csv
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/train_history.csv:
+          cache: false
+          x: epoch
 
-  evaluate:
-    cmd: python scripts/evaluate.py --config params.yaml
+  evaluate_val:
+    cmd: >-
+      uv run --locked python
+      scripts/evaluate.py
+      --config params.yaml
+      --split val
+      --output-dir
+      ${project.artifact_dir}/runs/${project.experiment_name}/reports
+      --create-output-dir
     deps:
       - scripts/evaluate.py
       - src/lesion_ml
-      - artifacts/models/best.ckpt
-      - data/splits/test.csv
+      - ${project.artifact_dir}/runs/${project.experiment_name}/checkpoints/best.ckpt
+      - ${data.train_csv}
+      - ${data.val_csv}
+      - data/raw/ham10000/images
     params:
-      - evaluate.primary_metric
-      - evaluate.top_k
-      - evaluate.confidence_threshold
+      - project
+      - inference
+      - evaluate
+      - preprocess
+      - augment.normalize
+    outs:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/val_predictions.csv:
+          cache: false
     metrics:
-      - artifacts/reports/test_metrics.json
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/val_metrics.json:
+          cache: false
     plots:
-      - artifacts/reports/confusion_matrix.csv
-      - artifacts/reports/per_class_metrics.csv
-  
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/val_confusion_matrix.csv:
+          cache: false
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/val_per_class_metrics.csv:
+          cache: false
+
+  evaluate_test:
+    cmd: >-
+      uv run --locked python
+      scripts/evaluate.py
+      --config params.yaml
+      --split test
+      --output-dir
+      ${project.artifact_dir}/runs/${project.experiment_name}/reports
+      --create-output-dir
+    deps:
+      - scripts/evaluate.py
+      - src/lesion_ml
+      - ${project.artifact_dir}/runs/${project.experiment_name}/checkpoints/best.ckpt
+      - ${data.train_csv}
+      - ${data.test_csv}
+      - data/raw/ham10000/images
+    params:
+      - project
+      - inference
+      - evaluate
+      - preprocess
+      - augment.normalize
+    outs:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/test_predictions.csv:
+          cache: false
+    metrics:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/test_metrics.json:
+          cache: false
+    plots:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/test_confusion_matrix.csv:
+          cache: false
+      - ${project.artifact_dir}/runs/${project.experiment_name}/reports/test_per_class_metrics.csv:
+          cache: false
+
   export_onnx:
-    cmd: python scripts/export_onnx.py --config params.yaml
+    cmd: >-
+      uv run --locked python
+      scripts/export_onnx.py
+      --config params.yaml
     deps:
       - scripts/export_onnx.py
       - src/lesion_ml
-      - artifacts/models/best.ckpt
+      - ${project.artifact_dir}/runs/${project.experiment_name}/checkpoints/best.ckpt
+      - ${data.train_csv}
     params:
-      - inference.checkpoint_path
-      - inference.onnx_path
+      - project
       - data.image_size
+      - data.labels
+      - train.use_metadata
+      - train.metadata_dim
+      - preprocess
+      - augment.normalize
     outs:
-      - deployment/onnx/model.onnx
+      - ${project.artifact_dir}/runs/${project.experiment_name}/onnx
+
+  evaluate_onnx_val:
+    cmd: >-
+      uv run --locked python
+      scripts/evaluate_onnx.py
+      --config params.yaml
+      --split val
+    deps:
+      - scripts/evaluate_onnx.py
+      - src/lesion_ml
+      - ${project.artifact_dir}/runs/${project.experiment_name}/onnx
+      - ${data.val_csv}
+      - data/raw/ham10000/images
+    params:
+      - project
+      - preprocess
+      - augment.normalize
+      - inference.onnx_provider
+    outs:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/deployment_eval/val_predictions.csv:
+          cache: false
+    metrics:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/deployment_eval/val_metrics.json:
+          cache: false
+
+  evaluate_onnx_test:
+    cmd: >-
+      uv run --locked python
+      scripts/evaluate_onnx.py
+      --config params.yaml
+      --split test
+    deps:
+      - scripts/evaluate_onnx.py
+      - src/lesion_ml
+      - ${project.artifact_dir}/runs/${project.experiment_name}/onnx
+      - ${data.test_csv}
+      - data/raw/ham10000/images
+    params:
+      - project
+      - preprocess
+      - augment.normalize
+      - inference.onnx_provider
+    outs:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/deployment_eval/test_predictions.csv:
+          cache: false
+    metrics:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/deployment_eval/test_metrics.json:
+          cache: false
+
+  calibrate:
+    cmd: >-
+      uv run --locked python
+      scripts/calibrate_temperature.py
+      --config params.yaml
+    deps:
+      - scripts/calibrate_temperature.py
+      - src/lesion_ml/inference/calibration.py
+      - src/lesion_ml/paths.py
+      - ${project.artifact_dir}/runs/${project.experiment_name}/deployment_eval/val_predictions.csv
+      - ${project.artifact_dir}/runs/${project.experiment_name}/deployment_eval/test_predictions.csv
+    params:
+      - project
+      - data.labels
+      - calibration
+    outs:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/temperature.json:
+          cache: false
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/calibrated_val_predictions.csv:
+          cache: false
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/calibrated_test_predictions.csv:
+          cache: false
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/reliability_diagram.png:
+          cache: false
+    metrics:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/calibration_metrics.json:
+          cache: false
+
+  triage_val:
+    cmd: >-
+      uv run --locked python
+      scripts/evaluate_selective_prediction.py
+      --config params.yaml
+      --split val
+    deps:
+      - scripts/evaluate_selective_prediction.py
+      - src/lesion_ml/paths.py
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/calibrated_val_predictions.csv
+    params:
+      - project
+      - data.labels
+      - selective_prediction
+    outs:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/selective_prediction/val
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/decision.json:
+          cache: false
+
+  triage_test:
+    cmd: >-
+      uv run --locked python
+      scripts/evaluate_selective_prediction.py
+      --config params.yaml
+      --split test
+    deps:
+      - scripts/evaluate_selective_prediction.py
+      - src/lesion_ml/paths.py
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/calibrated_test_predictions.csv
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/decision.json
+    params:
+      - project
+      - data.labels
+      - selective_prediction.thresholds
+    outs:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/selective_prediction/test
+
+  error_analysis_test:
+    cmd: >-
+      uv run --locked python
+      scripts/error_analysis.py
+      --config params.yaml
+      --metadata-csv ${data.metadata_csv}
+    deps:
+      - scripts/error_analysis.py
+      - src/lesion_ml/paths.py
+      - ${data.metadata_csv}
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/calibrated_test_predictions.csv
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/decision.json
+    params:
+      - project
+      - data.labels
+      - error_analysis
+    outs:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/error_analysis
+
+  build_deployment_bundle:
+    cmd: >-
+      uv run --locked python
+      scripts/build_deployment_bundle.py
+      --config params.yaml
+    deps:
+      - scripts/build_deployment_bundle.py
+      - src/lesion_ml/paths.py
+      - ${project.artifact_dir}/runs/${project.experiment_name}/onnx
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/temperature.json
+      - ${project.artifact_dir}/runs/${project.experiment_name}/calibration/decision.json
+    params:
+      - project
+      - deployment
+    outs:
+      - ${deployment.bundle_dir}
+
+  benchmark_onnx:
+    cmd: >-
+      uv run --locked python
+      scripts/benchmark_inference.py
+      --onnx-path ${deployment.bundle_dir}/model.onnx
+      --image-size ${data.image_size}
+      --provider ${inference.onnx_provider}
+      --out-json
+      ${project.artifact_dir}/runs/${project.experiment_name}/benchmark/inference_benchmark.json
+      --out-csv
+      ${project.artifact_dir}/runs/${project.experiment_name}/benchmark/inference_benchmark.csv
+    deps:
+      - scripts/benchmark_inference.py
+      - ${deployment.bundle_dir}
+    params:
+      - project
+      - data.image_size
+      - inference.onnx_provider
+    outs:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/benchmark/inference_benchmark.csv:
+          cache: false
+    metrics:
+      - ${project.artifact_dir}/runs/${project.experiment_name}/benchmark/inference_benchmark.json:
+          cache: false

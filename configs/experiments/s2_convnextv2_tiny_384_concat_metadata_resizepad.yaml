@@ -1,6 +1,6 @@
 project:
   seed: 42
-  experiment_name: convnextv2_tiny_384_gmu_metadata_resizepad_strict
+  experiment_name: convnextv2_tiny_384_concat_metadata_resizepad
   artifact_dir: artifacts
 
 data:
@@ -39,7 +39,7 @@ train:
   metadata_dim: 19
   metadata_hidden_dim: 96
   fusion_hidden_dim: 384
-  fusion_type: gmu
+  fusion_type: concat
   dropout: 0.25
   drop_path_rate: 0.10
 

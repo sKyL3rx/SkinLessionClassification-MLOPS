@@ -1,6 +1,6 @@
 project:
   seed: 42
-  experiment_name: convnextv2_tiny_384_gmu_metadata_resizepad_strict
+  experiment_name: dinov2_small_frozen_518_gmu_metadata_resizepad
   artifact_dir: artifacts
 
 data:
@@ -15,7 +15,7 @@ data:
   val_csv: data/splits/val.csv
   test_csv: data/splits/test.csv
 
-  image_size: 384
+  image_size: 518
   num_classes: 7
   labels:
     - akiec
@@ -31,30 +31,30 @@ data:
   group_by: split_group
 
 train:
-  backbone: convnextv2_tiny
+  backbone: dinov2_small
   pretrained: true
-  freeze_backbone: false
+  freeze_backbone: true
 
   use_metadata: true
   metadata_dim: 19
-  metadata_hidden_dim: 96
-  fusion_hidden_dim: 384
+  metadata_hidden_dim: 128
+  fusion_hidden_dim: 512
   fusion_type: gmu
   dropout: 0.25
-  drop_path_rate: 0.10
+  drop_path_rate: 0.0
 
-  batch_size: 32
+  batch_size: 16
   num_workers: 8
   epochs: 100
 
   optimizer: adamw
-  lr: 0.00008
-  backbone_lr_mult: 0.25
+  lr: 0.0005
+  backbone_lr_mult: 0.0
   head_lr_mult: 1.0
-  min_lr: 0.000001
-  weight_decay: 0.00005
+  min_lr: 0.000005
+  weight_decay: 0.0001
   scheduler: cosine_warmup
-  warmup_epochs: 5
+  warmup_epochs: 3
 
   loss: cb_focal
   cb_beta: 0.999
@@ -64,15 +64,15 @@ train:
   label_smoothing: 0.03
 
   mixed_precision: true
-  channels_last: true
+  channels_last: false
   grad_clip_norm: 1.0
 
   early_stopping: true
-  early_stopping_patience: 14
+  early_stopping_patience: 10
   early_stopping_min_delta: 0.0005
 
   model_ema: true
-  model_ema_decay: 0.9998
+  model_ema_decay: 0.9995
 
   mixup_alpha: 0.0
   mixup_prob: 0.0
@@ -85,22 +85,22 @@ preprocess:
 
 augment:
   use_random_resized_crop: false
-  crop_scale: [0.75, 1.0]
-  crop_ratio: [0.9, 1.1]
+  crop_scale: [0.85, 1.0]
+  crop_ratio: [0.95, 1.05]
 
   horizontal_flip_p: 0.5
   vertical_flip_p: 0.5
 
-  shift_limit: 0.04
-  scale_limit: 0.08
-  rotate_limit: 30
-  geometric_p: 0.5
+  shift_limit: 0.02
+  scale_limit: 0.05
+  rotate_limit: 20
+  geometric_p: 0.4
 
-  brightness: 0.15
-  contrast: 0.15
-  saturation: 0.12
-  hue: 0.03
-  color_jitter_p: 0.25
+  brightness: 0.10
+  contrast: 0.10
+  saturation: 0.08
+  hue: 0.02
+  color_jitter_p: 0.20
 
   normalize: true
 

@@ -1,6 +1,6 @@
 project:
   seed: 42
-  experiment_name: convnextv2_tiny_384_gmu_metadata_resizepad_strict
+  experiment_name: efficientnetv2_s_stage1_224_gmu_metadata_resizepad
   artifact_dir: artifacts
 
 data:
@@ -15,7 +15,7 @@ data:
   val_csv: data/splits/val.csv
   test_csv: data/splits/test.csv
 
-  image_size: 384
+  image_size: 224
   num_classes: 7
   labels:
     - akiec
@@ -31,7 +31,7 @@ data:
   group_by: split_group
 
 train:
-  backbone: convnextv2_tiny
+  backbone: efficientnetv2_s
   pretrained: true
   freeze_backbone: false
 
@@ -40,21 +40,21 @@ train:
   metadata_hidden_dim: 96
   fusion_hidden_dim: 384
   fusion_type: gmu
-  dropout: 0.25
+  dropout: 0.20
   drop_path_rate: 0.10
 
-  batch_size: 32
+  batch_size: 64
   num_workers: 8
-  epochs: 100
+  epochs: 35
 
   optimizer: adamw
-  lr: 0.00008
+  lr: 0.00015
   backbone_lr_mult: 0.25
   head_lr_mult: 1.0
   min_lr: 0.000001
   weight_decay: 0.00005
   scheduler: cosine_warmup
-  warmup_epochs: 5
+  warmup_epochs: 3
 
   loss: cb_focal
   cb_beta: 0.999
@@ -68,7 +68,7 @@ train:
   grad_clip_norm: 1.0
 
   early_stopping: true
-  early_stopping_patience: 14
+  early_stopping_patience: 10
   early_stopping_min_delta: 0.0005
 
   model_ema: true
@@ -85,7 +85,7 @@ preprocess:
 
 augment:
   use_random_resized_crop: false
-  crop_scale: [0.75, 1.0]
+  crop_scale: [0.80, 1.0]
   crop_ratio: [0.9, 1.1]
 
   horizontal_flip_p: 0.5

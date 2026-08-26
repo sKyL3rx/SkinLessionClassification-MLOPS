@@ -2,26 +2,37 @@
 .dvc
 .venv
 venv
+env
+
 __pycache__
 *.pyc
+*.pyo
+
 .pytest_cache
 .mypy_cache
 .ruff_cache
+.ipynb_checkpoints
 
-data/raw
-data/interim
-data/processed
-data/external
-data/splits
+data/**
+artifacts/**
 
-artifacts/models
-artifacts/reports
-artifacts/plots
+!artifacts/deployment/
+!artifacts/deployment/model/
+!artifacts/deployment/model/**
+
+configs/experiments
+notebooks
 
 mlruns
+mlartifacts
 wandb
-notebooks
+
+_local_archive
 
 *.ckpt
 *.pt
 *.pth
+*.zip
+.env
+
+_local_archive/

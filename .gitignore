@@ -52,8 +52,6 @@ artifacts/reports/**/ensemble_*_predictions.csv
 artifacts/reports/**/calibrated_*_predictions.csv
 artifacts/reports/**/predictions.csv
 
-# ONNX artifacts
-
 # MLflow / W&B
 mlruns/
 mlartifacts/
@@ -68,3 +66,5 @@ dvc_plots/
 # Local archives
 *.zip
 _local_archive/
+
+artifacts/deployment/
