@@ -17,7 +17,7 @@ def build_resize_transforms(
     """Build resize transforms.
 
     resize:
-        Directly resize to image_size x image_size. 
+        Directly resize to image_size x image_size.
 
     resize_pad:
         Preserve aspect ratio with LongestMaxSize, then pad to image_size x image_size.
@@ -162,11 +162,11 @@ def get_tta_transforms(
 ) -> list[A.Compose]:
     """Light TTA.
 
-    - original
-    - hflip
-    - vflip
-    - hflip + vflip
-.
+        - original
+        - hflip
+        - vflip
+        - hflip + vflip
+    .
     """
     resize_transforms = build_resize_transforms(
         image_size=image_size,

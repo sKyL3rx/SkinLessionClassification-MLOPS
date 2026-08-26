@@ -67,23 +67,17 @@ class SkinLesionONNXPredictor:
 
         active_providers = self.session.get_providers()
 
-        print(
-            "[INFO] Active ONNX providers: "
-            f"{active_providers}"
-        )
+        print(f"[INFO] Active ONNX providers: {active_providers}")
 
         if (
             providers[0] == "CUDAExecutionProvider"
-            and active_providers[0]
-            != "CUDAExecutionProvider"
+            and active_providers[0] != "CUDAExecutionProvider"
         ):
             raise RuntimeError(
                 "CUDA was requested, but ONNX Runtime "
                 "falling back to CPU. "
                 f"Active providers: {active_providers}"
             )
-
-
 
         self.inputs = {input_meta.name: input_meta for input_meta in self.session.get_inputs()}
 
@@ -122,20 +116,17 @@ class SkinLesionONNXPredictor:
 
         if provider == "cpu":
             return ["CPUExecutionProvider"]
-    
+
         if provider != "cuda":
-            raise ValueError(
-                f"Unsupported ONNX provider: {provider!r}"
-            )
-        
+            raise ValueError(f"Unsupported ONNX provider: {provider!r}")
+
         ort.preload_dlls(directory="")
 
         available = ort.get_available_providers()
 
         if "CUDAExecutionProvider" not in available:
             raise RuntimeError(
-                "CUDAExecutionProvider is unavailable. "
-                f"Available providers: {available}"
+                f"CUDAExecutionProvider is unavailable. Available providers: {available}"
             )
 
         return [

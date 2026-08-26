@@ -13,9 +13,7 @@ import onnxruntime as ort
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Benchmark ONNX Runtime inference."
-    )
+    parser = argparse.ArgumentParser(description="Benchmark ONNX Runtime inference.")
 
     parser.add_argument(
         "--onnx-path",
@@ -68,9 +66,7 @@ def parse_args() -> argparse.Namespace:
 def resolve_providers(
     provider: str,
 ) -> list[str]:
-    available = (
-        ort.get_available_providers()
-    )
+    available = ort.get_available_providers()
 
     if provider == "cpu":
         return [
@@ -78,13 +74,9 @@ def resolve_providers(
         ]
 
     if provider == "cuda":
-        if (
-            "CUDAExecutionProvider"
-            not in available
-        ):
+        if "CUDAExecutionProvider" not in available:
             raise RuntimeError(
-                "CUDAExecutionProvider is not available. "
-                f"Available providers: {available}"
+                f"CUDAExecutionProvider is not available. Available providers: {available}"
             )
 
         return [
@@ -92,10 +84,7 @@ def resolve_providers(
             "CPUExecutionProvider",
         ]
 
-    if (
-        "CUDAExecutionProvider"
-        in available
-    ):
+    if "CUDAExecutionProvider" in available:
         return [
             "CUDAExecutionProvider",
             "CPUExecutionProvider",
@@ -128,10 +117,7 @@ def resolve_static_dimension(
     value: object,
     fallback: int,
 ) -> int:
-    if (
-        isinstance(value, int)
-        and value > 0
-    ):
+    if isinstance(value, int) and value > 0:
         return value
 
     return fallback
@@ -147,44 +133,32 @@ def make_dummy_feed(
 
     for input_meta in session.get_inputs():
         if input_meta.name == "image":
-            feed[input_meta.name] = (
-                np.random.randn(
-                    batch_size,
-                    3,
-                    image_size,
-                    image_size,
-                ).astype(np.float32)
-            )
+            feed[input_meta.name] = np.random.randn(
+                batch_size,
+                3,
+                image_size,
+                image_size,
+            ).astype(np.float32)
 
         elif input_meta.name == "metadata":
-            metadata_dim = (
-                resolve_static_dimension(
-                    input_meta.shape[-1],
-                    fallback=19,
-                )
+            metadata_dim = resolve_static_dimension(
+                input_meta.shape[-1],
+                fallback=19,
             )
 
-            feed[input_meta.name] = (
-                np.zeros(
-                    (
-                        batch_size,
-                        metadata_dim,
-                    ),
-                    dtype=np.float32,
-                )
+            feed[input_meta.name] = np.zeros(
+                (
+                    batch_size,
+                    metadata_dim,
+                ),
+                dtype=np.float32,
             )
 
         else:
-            raise RuntimeError(
-                "Unsupported ONNX input: "
-                f"{input_meta.name}"
-            )
+            raise RuntimeError(f"Unsupported ONNX input: {input_meta.name}")
 
     if "image" not in feed:
-        raise RuntimeError(
-            "ONNX model does not expose "
-            "an 'image' input."
-        )
+        raise RuntimeError("ONNX model does not expose an 'image' input.")
 
     return feed
 
@@ -221,37 +195,19 @@ def benchmark_batch(
 
         end = time.perf_counter()
 
-        latencies_ms.append(
-            (end - start) * 1000.0
-        )
+        latencies_ms.append((end - start) * 1000.0)
 
-    mean_ms = statistics.mean(
-        latencies_ms
-    )
+    mean_ms = statistics.mean(latencies_ms)
 
-    std_ms = (
-        statistics.pstdev(
-            latencies_ms
-        )
-        if len(latencies_ms) > 1
-        else 0.0
-    )
+    std_ms = statistics.pstdev(latencies_ms) if len(latencies_ms) > 1 else 0.0
 
     return {
         "batch_size": int(batch_size),
         "runs": int(runs),
-        "warmup_runs": int(
-            warmup_runs
-        ),
-        "mean_latency_ms": float(
-            mean_ms
-        ),
-        "std_latency_ms": float(
-            std_ms
-        ),
-        "min_latency_ms": float(
-            min(latencies_ms)
-        ),
+        "warmup_runs": int(warmup_runs),
+        "mean_latency_ms": float(mean_ms),
+        "std_latency_ms": float(std_ms),
+        "min_latency_ms": float(min(latencies_ms)),
         "p50_latency_ms": percentile(
             latencies_ms,
             50,
@@ -264,15 +220,8 @@ def benchmark_batch(
             latencies_ms,
             99,
         ),
-        "max_latency_ms": float(
-            max(latencies_ms)
-        ),
-        "throughput_images_per_sec": (
-            float(
-                batch_size
-                / (mean_ms / 1000.0)
-            )
-        ),
+        "max_latency_ms": float(max(latencies_ms)),
+        "throughput_images_per_sec": (float(batch_size / (mean_ms / 1000.0))),
     }
 
 
@@ -288,9 +237,7 @@ def write_csv(
     if not rows:
         return
 
-    fieldnames = list(
-        rows[0].keys()
-    )
+    fieldnames = list(rows[0].keys())
 
     with path.open(
         "w",
@@ -309,28 +256,14 @@ def write_csv(
 def get_onnx_artifact_size_mb(
     onnx_path: Path,
 ) -> float:
-    total_bytes = (
-        onnx_path.stat().st_size
-    )
+    total_bytes = onnx_path.stat().st_size
 
-    external_data_path = (
-        onnx_path.with_name(
-            onnx_path.name + ".data"
-        )
-    )
+    external_data_path = onnx_path.with_name(onnx_path.name + ".data")
 
     if external_data_path.exists():
-        total_bytes += (
-            external_data_path
-            .stat()
-            .st_size
-        )
+        total_bytes += external_data_path.stat().st_size
 
-    return float(
-        total_bytes
-        / 1024
-        / 1024
-    )
+    return float(total_bytes / 1024 / 1024)
 
 
 def main() -> None:
@@ -339,72 +272,34 @@ def main() -> None:
     onnx_path = args.onnx_path
 
     if not onnx_path.exists():
-        raise FileNotFoundError(
-            f"ONNX model not found: {onnx_path}"
-        )
+        raise FileNotFoundError(f"ONNX model not found: {onnx_path}")
 
-    model_size_mb = (
-        get_onnx_artifact_size_mb(
-            onnx_path
-        )
-    )
+    model_size_mb = get_onnx_artifact_size_mb(onnx_path)
 
-    requested_provider = (
-        args.provider
-        .strip()
-        .lower()
-    )
+    requested_provider = args.provider.strip().lower()
 
     if requested_provider == "cuda":
-        ort.preload_dlls(
-            directory=""
-        )
+        ort.preload_dlls(directory="")
 
-    providers = resolve_providers(
-        requested_provider
-    )
+    providers = resolve_providers(requested_provider)
 
-    print(
-        f"[INFO] ONNX path: {onnx_path}"
-    )
-    print(
-        "[INFO] ONNX artifact size: "
-        f"{model_size_mb:.2f} MB"
-    )
-    print(
-        "[INFO] Available providers: "
-        f"{ort.get_available_providers()}"
-    )
-    print(
-        "[INFO] Requested provider: "
-        f"{requested_provider}"
-    )
-    print(
-        "[INFO] Requested session providers: "
-        f"{providers}"
-    )
+    print(f"[INFO] ONNX path: {onnx_path}")
+    print(f"[INFO] ONNX artifact size: {model_size_mb:.2f} MB")
+    print(f"[INFO] Available providers: {ort.get_available_providers()}")
+    print(f"[INFO] Requested provider: {requested_provider}")
+    print(f"[INFO] Requested session providers: {providers}")
 
     session = ort.InferenceSession(
         str(onnx_path),
         providers=providers,
     )
 
-    active_providers = (
-        session.get_providers()
-    )
+    active_providers = session.get_providers()
 
-    print(
-        "[INFO] Active session providers: "
-        f"{active_providers}"
-    )
+    print(f"[INFO] Active session providers: {active_providers}")
 
-    if (
-        requested_provider == "cuda"
-        and (
-            not active_providers
-            or active_providers[0]
-            != "CUDAExecutionProvider"
-        )
+    if requested_provider == "cuda" and (
+        not active_providers or active_providers[0] != "CUDAExecutionProvider"
     ):
         raise RuntimeError(
             "CUDA was requested, but ONNX Runtime "
@@ -420,42 +315,25 @@ def main() -> None:
             f"type={input_meta.type}"
         )
 
-    results: list[
-        dict[str, Any]
-    ] = []
+    results: list[dict[str, Any]] = []
 
     for batch_size in args.batch_sizes:
-        print(
-            "[INFO] Benchmarking "
-            f"batch_size={batch_size}"
-        )
+        print(f"[INFO] Benchmarking batch_size={batch_size}")
 
         row = benchmark_batch(
             session=session,
             batch_size=int(batch_size),
-            image_size=int(
-                args.image_size
-            ),
-            warmup_runs=int(
-                args.warmup_runs
-            ),
+            image_size=int(args.image_size),
+            warmup_runs=int(args.warmup_runs),
             runs=int(args.runs),
         )
 
         row = {
             "backend": "onnxruntime",
-            "providers": ",".join(
-                active_providers
-            ),
-            "onnx_path": str(
-                onnx_path
-            ),
-            "model_size_mb": (
-                model_size_mb
-            ),
-            "image_size": int(
-                args.image_size
-            ),
+            "providers": ",".join(active_providers),
+            "onnx_path": str(onnx_path),
+            "model_size_mb": (model_size_mb),
+            "image_size": int(args.image_size),
             **row,
         }
 
@@ -478,18 +356,10 @@ def main() -> None:
     )
 
     payload = {
-        "onnx_path": str(
-            onnx_path
-        ),
-        "requested_provider": (
-            requested_provider
-        ),
-        "available_providers": (
-            ort.get_available_providers()
-        ),
-        "session_providers": (
-            active_providers
-        ),
+        "onnx_path": str(onnx_path),
+        "requested_provider": (requested_provider),
+        "available_providers": (ort.get_available_providers()),
+        "session_providers": (active_providers),
         "results": results,
     }
 
@@ -508,14 +378,8 @@ def main() -> None:
         results,
     )
 
-    print(
-        "[INFO] Wrote JSON benchmark to: "
-        f"{out_json}"
-    )
-    print(
-        "[INFO] Wrote CSV benchmark to: "
-        f"{out_csv}"
-    )
+    print(f"[INFO] Wrote JSON benchmark to: {out_json}")
+    print(f"[INFO] Wrote CSV benchmark to: {out_csv}")
 
 
 if __name__ == "__main__":

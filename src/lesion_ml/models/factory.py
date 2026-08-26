@@ -11,7 +11,7 @@ SUPPORTED_BACKBONES = {
     # ConvNeXt family
     "convnext_tiny": "convnext_tiny",
     "convnext_tiny_hnf": "convnext_tiny_hnf",
-    # Optional aliases 
+    # Optional aliases
     "convnextv2_tiny": "convnextv2_tiny.fcmae_ft_in22k_in1k_384",
     "efficientnetv2_s": "tf_efficientnetv2_s.in21k_ft_in1k",
     "swin_tiny": "swin_tiny_patch4_window7_224",
