@@ -1,0 +1,53 @@
+# Data: do not sync raw images, but keep DVC pointer files
+data/raw/ham10000/
+data/raw/images/
+data/raw/**/images/
+data/raw/**/*.jpg
+data/raw/**/*.jpeg
+data/raw/**/*.png
+
+# Keep DVC pointer files required by dvc pull
+!data/raw/*.dvc
+!data/raw/ham10000.dvc
+
+# Generated data
+data/interim/
+data/processed/
+data/splits/
+data/external/
+
+# DVC cache, but keep DVC config/metafiles
+.dvc/cache/
+.dvc/tmp/
+.dvc/config.local
+
+# Artifacts
+artifacts/
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# Python/env/cache
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Logs/temp/editor
+logs/
+*.log
+tmp/
+temp/
+.cache/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Git: optional, keep ignored because we use dvc no_scm on SkyPilot
+.git/
