@@ -2,16 +2,14 @@
 
 This document summarizes the six main experiments used to compare image-only and multimodal models for skin lesion classification.
 
-The main questions were:
+The experiments focus on four main questions:
 
-- How strong is the image-only baseline?
-- Does metadata improve performance?
-- Is GMU better than simple concatenation?
-- Does dark-border cropping help?
-- Does changing the backbone improve the multimodal model?
-- Can frozen DINOv2 features compete with end-to-end trained CNNs?
+- Does patient metadata improve over an image-only model?
+- Is GMU fusion better than simple concatenation?
+- Does additional image preprocessing help?
+- How do alternative image backbones compare with ConvNeXtV2?
 
-For model selection, I use **Best Validation Macro-F1** as the main metric and report test metrics separately.
+For model selection, I use **Best Validation Macro-F1** as the main ranking metric and report test metrics separately.
 
 ---
 
@@ -29,6 +27,23 @@ For model selection, I use **Best Validation Macro-F1** as the main metric and r
 All experiments use the same seven-class HAM10000 classification task.
 
 The main experiments use class-balanced focal loss.
+
+---
+
+## Experiment Artifacts
+
+The full training runs, reports, configurations, and checkpoints are stored on Google Drive.
+
+Each link below points to the exact run folder used for the results in this document.
+
+| ID | Google Drive Run Folder | Artifacts |
+|---|---|---|
+| S1 | `convnextv2_tiny_384_image_only_resizepad` | [Open S1 run](S1_GOOGLE_DRIVE_LINK) |
+| S2 | `convnextv2_tiny_384_concat_metadata_resizepad` | [Open S2 run](S2_GOOGLE_DRIVE_LINK) |
+| S3 | `convnextv2_tiny_384_gmu_metadata_resizepad_strict` | [Open S3 run](S3_GOOGLE_DRIVE_LINK) |
+| S4 | `convnextv2_tiny_384_gmu_metadata_crop_dark_border` | [Open S4 run](S4_GOOGLE_DRIVE_LINK) |
+| S5 | `efficientnetv2_s_stage2_384_gmu_metadata_resizepad` | [Open S5 run](S5_GOOGLE_DRIVE_LINK) |
+| S6 | `dinov2_small_frozen_518_gmu_metadata_resizepad` | [Open S6 run](S6_GOOGLE_DRIVE_LINK) |
 
 ---
 
@@ -51,9 +66,11 @@ S3 achieved the highest **Best Validation Macro-F1** and the highest **Test Macr
 
 **Run**
 
-```text
-convnextv2_tiny_384_image_only_resizepad
-```
+`convnextv2_tiny_384_image_only_resizepad`
+
+**Artifacts**
+
+[Google Drive — `convnextv2_tiny_384_image_only_resizepad`](https://drive.google.com/drive/folders/1IlFR3HfoSs1udqhqZv6K5Grfqz6r7Qsp?usp=sharing)
 
 ## Configuration
 
@@ -77,7 +94,7 @@ convnextv2_tiny_384_image_only_resizepad
 
 S1 provided a strong image-only baseline.
 
-Its Test Macro-F1 of `0.8229` was already competitive with the later multimodal models, so metadata had to provide a real improvement rather than simply adding more complexity.
+Its Test Macro-F1 of `0.8229` was already competitive with the later multimodal models, so metadata had to provide a meaningful improvement rather than simply adding more complexity.
 
 ---
 
@@ -85,9 +102,11 @@ Its Test Macro-F1 of `0.8229` was already competitive with the later multimodal 
 
 **Run**
 
-```text
-convnextv2_tiny_384_concat_metadata_resizepad
-```
+`convnextv2_tiny_384_concat_metadata_resizepad`
+
+**Artifacts**
+
+[Google Drive — `convnextv2_tiny_384_concat_metadata_resizepad`](https://drive.google.com/drive/folders/1LKyOWkuZ-K-yM02J79_Zpr6mSDjSF3Sr?usp=sharing)
 
 ## Configuration
 
@@ -137,9 +156,11 @@ Difference:
 
 ## Key insights
 
-Adding metadata improved the best validation score, but simple concatenation did not improve test performance.
+Adding metadata improved the validation score, but the gain did not carry over to the test set.
 
-This suggested that metadata could be useful, but the fusion method mattered.
+This suggested that metadata contained useful signal, while simple concatenation was not enough to use it consistently.
+
+This motivated the GMU experiment in S3.
 
 ---
 
@@ -147,9 +168,11 @@ This suggested that metadata could be useful, but the fusion method mattered.
 
 **Run**
 
-```text
-convnextv2_tiny_384_gmu_metadata_resizepad_strict
-```
+`convnextv2_tiny_384_gmu_metadata_resizepad_strict`
+
+**Artifacts**
+
+[Google Drive — `convnextv2_tiny_384_gmu_metadata_resizepad_strict`](https://drive.google.com/drive/folders/1MZNUbtY7UpTi0jJSxilY1kr6QxZBoOAV?usp=sharing)
 
 ## Configuration
 
@@ -245,7 +268,7 @@ Difference:
 
 The validation improvement from metadata + GMU was clear.
 
-The improvement on the test set was much smaller because S1 was already a strong visual baseline.
+The test improvement over S1 was much smaller because the image-only baseline was already strong.
 
 ---
 
@@ -253,9 +276,11 @@ The improvement on the test set was much smaller because S1 was already a strong
 
 **Run**
 
-```text
-convnextv2_tiny_384_gmu_metadata_crop_dark_border
-```
+`convnextv2_tiny_384_gmu_metadata_crop_dark_border`
+
+**Artifacts**
+
+[Google Drive — `convnextv2_tiny_384_gmu_metadata_crop_dark_border`](https://drive.google.com/drive/folders/1BU0Wuy9xsJxHjIjwL31V99m65vGt_vZ4?usp=sharing)
 
 ## Configuration
 
@@ -318,9 +343,11 @@ The simpler strict resize-and-pad preprocessing used by S3 performed better, so 
 
 **Run**
 
-```text
-efficientnetv2_s_stage2_384_gmu_metadata_resizepad
-```
+`efficientnetv2_s_stage2_384_gmu_metadata_resizepad`
+
+**Artifacts**
+
+[Google Drive — `efficientnetv2_s_stage2_384_gmu_metadata_resizepad`](https://drive.google.com/drive/folders/12E06jk9VoWlZ-UnUUt-yU9YDRojNInr-?usp=sharing)
 
 ## Configuration
 
@@ -331,7 +358,7 @@ efficientnetv2_s_stage2_384_gmu_metadata_resizepad
 - resize-and-pad preprocessing
 - class-balanced focal loss
 
-S5 tested whether changing the image backbone while keeping the multimodal setup could improve performance.
+S5 tested whether changing the image backbone while keeping the same multimodal setup could improve performance.
 
 ## Results
 
@@ -382,9 +409,11 @@ For this setup, changing the backbone did not improve over ConvNeXtV2.
 
 **Run**
 
-```text
-dinov2_small_frozen_518_gmu_metadata_resizepad
-```
+`dinov2_small_frozen_518_gmu_metadata_resizepad`
+
+**Artifacts**
+
+[Google Drive — `dinov2_small_frozen_518_gmu_metadata_resizepad`](https://drive.google.com/drive/folders/1r32BXKBRZGjZynHke11TijaqSGC0Le1T?usp=sharing)
 
 ## Configuration
 
@@ -501,20 +530,20 @@ Using a pretrained foundation-model representation did not automatically lead to
 
 The selected model is **S3**:
 
-```text
-convnextv2_tiny_384_gmu_metadata_resizepad_strict
-```
+`convnextv2_tiny_384_gmu_metadata_resizepad_strict`
 
-Configuration:
+**Selected model artifacts**
 
-```text
-ConvNeXtV2-Tiny
-384 × 384 input
-image + metadata
-GMU fusion
-strict resize-and-pad preprocessing
-class-balanced focal loss
-```
+[Google Drive — `convnextv2_tiny_384_gmu_metadata_resizepad_strict`](S3_GOOGLE_DRIVE_LINK)
+
+## Configuration
+
+- ConvNeXtV2-Tiny
+- 384 × 384 input
+- image + metadata
+- GMU fusion
+- strict resize-and-pad preprocessing
+- class-balanced focal loss
 
 ## Selected Model Metrics
 
@@ -535,10 +564,10 @@ It also produced the highest Test Macro-F1 and Test Balanced Accuracy among the 
 
 ## 1. The image-only baseline was already strong
 
-S1 achieved:
+S1 achieved a Test Macro-F1 of:
 
 ```text
-Test Macro-F1 = 0.8229
+0.8229
 ```
 
 This made it a meaningful baseline rather than an intentionally weak comparison.
@@ -561,7 +590,7 @@ S1: 0.8229
 S2: 0.8087
 ```
 
-Simply adding metadata with concatenation did not guarantee better generalization.
+Adding metadata with simple concatenation did not guarantee better generalization.
 
 ---
 
@@ -619,7 +648,7 @@ but its Test Macro-F1 was:
 0.7517
 ```
 
-ConvNeXtV2 remained the stronger backbone for the multimodal setup.
+ConvNeXtV2 remained the stronger backbone for this multimodal setup.
 
 ---
 
@@ -660,7 +689,7 @@ FastAPI
 Gradio demo
 ```
 
-The S1–S6 experiments are used for model selection, while the deployment stages focus only on the selected model.
+The S1–S6 experiments are used for model selection, while the deployment stages focus on the selected model.
 
 ---
 
@@ -697,4 +726,4 @@ Test Accuracy:            0.8842
 Test Balanced Accuracy:   0.8098
 ```
 
-The main result from these experiments was that **the fusion strategy mattered more than simply adding metadata**, while changing the backbone or adding extra preprocessing did not automatically improve performance.
+The main result from these experiments was that **the fusion strategy mattered more than simply adding metadata**, while changing the backbone or adding additional preprocessing did not automatically improve performance.
