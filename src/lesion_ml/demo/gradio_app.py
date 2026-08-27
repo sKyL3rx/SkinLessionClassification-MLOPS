@@ -87,14 +87,10 @@ def predict_via_api(
         except ValueError:
             detail = error.response.text
 
-        raise gr.Error(
-            f"API returned {error.response.status_code}: {detail}"
-        ) from error
+        raise gr.Error(f"API returned {error.response.status_code}: {detail}") from error
 
     except httpx.RequestError as error:
-        raise gr.Error(
-            f"Could not connect to the API at {API_URL}."
-        ) from error
+        raise gr.Error(f"Could not connect to the API at {API_URL}.") from error
 
     return response.json()
 
