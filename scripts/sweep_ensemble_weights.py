@@ -18,6 +18,7 @@ from sklearn.metrics import (
 
 DEFAULT_LABELS = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"]
 
+
 def load_yaml(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
@@ -168,7 +169,7 @@ def load_split_predictions(
 
 
 # -----------------------------------------------------------------------------
-# Ensemble weight generation
+# Ensemble weight generate
 # -----------------------------------------------------------------------------
 
 
@@ -197,10 +198,6 @@ def generate_weights_for_subset(
     max_weight_by_model: dict[str, float],
     min_weight_by_model_when_present: dict[str, float],
 ) -> list[dict[str, float]]:
-    """Generate weights for a fixed model subset.
-
-    Every model in subset is used with weight >= min_nonzero_weight, weights sum to 1.
-    """
     values = quantized_weight_values(step)
     results: list[dict[str, float]] = []
 
@@ -472,7 +469,6 @@ def save_selected_outputs(
         f"balanced_accuracy={test_metrics['balanced_accuracy']:.4f}, "
         f"accuracy={test_metrics['accuracy']:.4f}"
     )
-
 
 
 def main() -> None:

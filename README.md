@@ -14,6 +14,7 @@ The project is based on the HAM10000 dataset and predicts seven lesion classes:
 - `nv`
 - `vasc`
 
+
 ---
 
 ## Project Overview
@@ -42,10 +43,12 @@ Calibration + selective prediction
    ↓
 Error analysis
    ↓
+Deployment bundle
+   ↓
 FastAPI / Gradio demo
 ```
 
-Instead of focusing on a single architecture, I used the project to compare different image backbones and metadata fusion strategies.
+Instead of focusing on a single architecture, I used the project to compare different image backbones, metadata fusion strategies, and preprocessing choices.
 
 ---
 
@@ -70,6 +73,12 @@ The experiments cover combinations of:
 - Gated Multimodal Unit (GMU)
 - different image resolutions
 - preprocessing and augmentation settings
+
+The six main experiments are documented in detail in [EXPERIMENTS.md](EXPERIMENTS.md).
+
+Full training runs, reports, and checkpoints are available on Google Drive:
+
+**[Google Drive — S1–S6 Experiment Artifacts](https://drive.google.com/drive/folders/15fYdbFiFylaicqMJwVrwqC1ChsTEGOpM?usp=sharing)**
 
 ---
 
@@ -105,11 +114,13 @@ The baseline multimodal model concatenates image and metadata representations be
 fused = concat(image_features, metadata_features)
 ```
 
+This strategy is used in S2 as the first multimodal baseline.
+
 ### Gated Multimodal Unit
 
 I also implemented a GMU-based fusion module.
 
-Instead of always combining both modalities with the same importance, GMU learns a gate controlling the contribution from each branch.
+Instead of always combining both modalities with the same importance, GMU learns a gate that controls the contribution from each branch.
 
 Conceptually:
 
@@ -138,30 +149,47 @@ The model factory can switch between `concat` and `gmu` through the experiment c
 
 ## Experiment Structure
 
-The project contains several experiment variants for comparing modeling choices.
+The project contains six main experiment variants for comparing modeling choices.
 
-| Experiment | Backbone | Metadata | Fusion |
-|---|---|---:|---|
-| S1 | ConvNeXtV2-Tiny | No | Image only |
-| S2 | ConvNeXtV2-Tiny | Yes | Concatenation |
-| S3 | ConvNeXtV2-Tiny | Yes | GMU |
-| S5 | EfficientNetV2-S | Yes | GMU |
-| S6 | DINOv2-Small | Yes | GMU |
+| Experiment | Backbone | Resolution | Metadata | Fusion | Main Change |
+|---|---|---:|---:|---|---|
+| S1 | ConvNeXtV2-Tiny | 384 | No | Image only | Image-only baseline |
+| S2 | ConvNeXtV2-Tiny | 384 | Yes | Concatenation | Add metadata |
+| S3 | ConvNeXtV2-Tiny | 384 | Yes | GMU | Learned multimodal fusion |
+| S4 | ConvNeXtV2-Tiny | 384 | Yes | GMU | Dark-border preprocessing |
+| S5 | EfficientNetV2-S | 384 | Yes | GMU | Backbone comparison |
+| S6 | DINOv2-Small | 518 | Yes | GMU | Frozen foundation backbone |
 
 The experiments are meant to answer questions such as:
 
 - Does metadata improve over an image-only model?
 - Does GMU improve over simple concatenation?
-- How much does the backbone affect performance?
-- Does changing image resolution affect the result?
+- Does additional image preprocessing help?
+- How much does the image backbone affect performance?
+- Can a frozen foundation-model backbone compete with end-to-end training?
 
-Model comparison is based on validation results rather than selecting directly on the test set.
+The selected model is **S3 — ConvNeXtV2-Tiny + Metadata + GMU**.
+
+Its main results were:
+
+| Metric | Score |
+|---|---:|
+| Best Validation Macro-F1 | **0.8471** |
+| Test Macro-F1 | **0.8241** |
+| Test Accuracy | **0.8842** |
+| Test Balanced Accuracy | **0.8098** |
+
+Model selection is based on validation performance rather than selecting directly on the test set.
+
+For the complete S1–S6 results, comparisons, and artifact links, see [EXPERIMENTS.md](EXPERIMENTS.md).
 
 ---
 
 ## Evaluation
 
-The evaluation pipeline reports metrics such as:
+The evaluation pipeline reports several metrics instead of relying only on accuracy.
+
+The main metrics include:
 
 - accuracy
 - macro F1
@@ -170,7 +198,9 @@ The evaluation pipeline reports metrics such as:
 - per-class metrics
 - confusion matrix
 
-Prediction outputs are also saved for later calibration and error analysis.
+Macro-F1 is useful for this project because HAM10000 is class-imbalanced.
+
+Prediction outputs can also be saved for later calibration and error analysis.
 
 Main evaluation code:
 
@@ -194,7 +224,7 @@ horizontal flip
 vertical flip
 ```
 
-Predictions from different views can be combined during inference without changing the trained checkpoint.
+Predictions from multiple views can be combined during inference without changing the trained checkpoint.
 
 ---
 
@@ -240,13 +270,13 @@ Conceptually:
 calibrated_logits = logits / T
 ```
 
-The learned temperature is then reused by the inference pipeline.
+The learned temperature is reused by the inference pipeline.
 
 ---
 
 ## Selective Prediction
 
-The project supports a simple confidence-based review policy.
+The project supports a confidence-based review policy.
 
 Instead of automatically accepting every prediction:
 
@@ -269,18 +299,24 @@ scripts/calibrate_temperature.py
 scripts/evaluate_selective_prediction.py
 ```
 
+Run:
+
+```bash
+make triage
+```
+
 ---
 
 ## Error Analysis
 
-After evaluating a model, I also inspect its failure cases instead of relying only on mentioned metrics.
+After evaluating the selected model, I also inspect its failure cases instead of relying only on aggregate metrics.
 
 The error-analysis stage looks at:
 
 - difficult lesion classes
 - common class confusions
 - low-confidence predictions
-- errors involving important classes such as mel, ...
+- errors involving important classes such as `mel` and `akiec`
 - metadata-related patterns
 
 Run:
@@ -288,6 +324,8 @@ Run:
 ```bash
 make error-analysis
 ```
+
+The goal is to understand where the model fails and whether those failures follow consistent patterns.
 
 ---
 
@@ -299,7 +337,7 @@ After selecting a model, the project builds a deployment bundle containing the a
 make bundle
 ```
 
-The bundle contains the ONNX model together with configuration used for calibration and prediction decisions.
+The bundle contains the ONNX model together with the configuration and files required for calibration and prediction decisions.
 
 The expected bundle can be validated with:
 
@@ -307,11 +345,15 @@ The expected bundle can be validated with:
 make check-bundle
 ```
 
+The deployment pipeline focuses on the selected S3 model rather than all six experimental models.
+
 ---
 
 ## FastAPI
 
 The inference API is implemented with FastAPI.
+
+Run:
 
 ```bash
 make serve-api
@@ -336,6 +378,8 @@ src/lesion_ml/api/
 ## Gradio Demo
 
 A small Gradio application is included for interactive testing.
+
+Run:
 
 ```bash
 make serve-demo
@@ -385,7 +429,7 @@ deployment/
 
 Some larger experiments were run on cloud GPU instances using SkyPilot.
 
-DVC with Cloudflare R2 is used to store large experiment artifacts such as checkpoints and exported models instead of committing them directly to Git.
+DVC with Cloudflare R2 is used to store large experiment artifacts such as checkpoints and exported models.
 
 ---
 
@@ -452,6 +496,7 @@ dvc.yaml
 │   └── paths.py
 │
 ├── tests/
+├── EXPERIMENTS.md
 ├── dvc.yaml
 ├── params.yaml
 └── Makefile
@@ -495,16 +540,28 @@ Calibrate confidence:
 make calibrate
 ```
 
-Evaluate the selective prediction policy:
+Evaluate the selective-prediction policy:
 
 ```bash
 make triage
+```
+
+Run error analysis:
+
+```bash
+make error-analysis
 ```
 
 Build the deployment bundle:
 
 ```bash
 make bundle
+```
+
+Validate the deployment bundle:
+
+```bash
+make check-bundle
 ```
 
 Run the API:
@@ -518,3 +575,11 @@ Run the demo:
 ```bash
 make serve-demo
 ```
+
+---
+
+## Experiment Artifacts
+
+The complete S1–S6 experiment report is available in:
+
+**[EXPERIMENTS.md](EXPERIMENTS.md)**
